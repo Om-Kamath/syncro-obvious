@@ -19,8 +19,9 @@ vi.mock('./apiKey', () => ({
   getApiKey: getApiKeyMock,
 }));
 
-import { getAI, generateContent, normalizeErrorMessage, extractFailureCost } from './geminiClient';
+import { getAI, generateContent, extractTokenUsage, extractFailureCost, normalizeErrorMessage } from './geminiClient';
 import { startLog, finishLog, subscribe, type LogEntry } from './logger';
+import type { GenerateContentResponse } from '@google/genai';
 
 const RESPONSE = { text: 'ok', candidates: [] };
 
@@ -251,5 +252,67 @@ describe('normalizeErrorMessage', () => {
 
   it('serializes arbitrary objects', () => {
     expect(normalizeErrorMessage({ status: 500 })).toBe('{"status":500}');
+  });
+});
+
+describe('token capture in the generateContent wrapper', () => {
+  it('attaches usageMetadata counts to the log entry on success', async () => {
+    generateContentMock.mockResolvedValue({
+      ...RESPONSE,
+      usageMetadata: { promptTokenCount: 120, candidatesTokenCount: 45, totalTokenCount: 165 },
+    });
+    const log = startLog('Test Op', 'gemini-test', 'detail');
+
+    await generateContent({ model: 'gemini-test', contents: 'hello' }, log);
+
+    expect(log.status).toBe('success');
+    expect(log.inputTokens).toBe(120);
+    expect(log.outputTokens).toBe(45);
+    expect(log.totalTokens).toBe(165);
+  });
+
+  it('leaves token fields unset when the response carries no usageMetadata', async () => {
+    const log = startLog('Test Op', 'gemini-test', 'detail');
+
+    await generateContent({ model: 'gemini-test', contents: 'hello' }, log);
+
+    expect(log.status).toBe('success');
+    expect(log.inputTokens).toBeUndefined();
+    expect(log.outputTokens).toBeUndefined();
+    expect(log.totalTokens).toBeUndefined();
+  });
+
+  it('sets no token fields on a failed call', async () => {
+    generateContentMock.mockRejectedValue(new Error('boom'));
+    const log = startLog('Test Op', 'gemini-test', 'detail');
+
+    await expect(
+      generateContent({ model: 'gemini-test', contents: 'hello' }, log)
+    ).rejects.toThrow('boom');
+    expect(log.inputTokens).toBeUndefined();
+    expect(log.outputTokens).toBeUndefined();
+    expect(log.totalTokens).toBeUndefined();
+  });
+});
+
+describe('extractTokenUsage', () => {
+  it('maps the SDK usageMetadata ids to LogEntry token fields', () => {
+    expect(
+      extractTokenUsage({
+        usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 2, totalTokenCount: 12 },
+      } as unknown as GenerateContentResponse)
+    ).toEqual({ inputTokens: 10, outputTokens: 2, totalTokens: 12 });
+  });
+
+  it('returns undefined when the response has no usageMetadata', () => {
+    expect(extractTokenUsage({} as unknown as GenerateContentResponse)).toBeUndefined();
+  });
+
+  it('passes partial counts through as undefined rather than zero', () => {
+    expect(
+      extractTokenUsage({
+        usageMetadata: { promptTokenCount: 7 },
+      } as unknown as GenerateContentResponse)
+    ).toEqual({ inputTokens: 7, outputTokens: undefined, totalTokens: undefined });
   });
 });

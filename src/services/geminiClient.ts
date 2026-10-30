@@ -36,6 +36,7 @@ export function normalizeErrorMessage(err: unknown): string {
 }
 
 /**
+/**
  * Token-usage shape the Gemini API reports, as carried on an error object when
  * a call fails after tokens were processed. Field names mirror the API.
  */
@@ -83,11 +84,40 @@ export function extractFailureCost(err: unknown): FailureCost {
 }
 
 /**
+ * Token counts reported by the model on a successful generateContent call.
+ * Field names are ours (aligned with LogEntry); the wrapper maps them from
+ * the SDK's `usageMetadata` ids.
+ */
+export interface TokenUsage {
+  inputTokens?: number;
+  outputTokens?: number;
+  totalTokens?: number;
+}
+
+/**
+ * Pure mapper from a response's `usageMetadata` to LogEntry token fields.
+ * Returns undefined when the model reported no usage (fields stay unset —
+ * never fabricated as zero), so callers can distinguish "unknown" from "free".
+ */
+export function extractTokenUsage(
+  response: GenerateContentResponse
+): TokenUsage | undefined {
+  const usage = response.usageMetadata;
+  if (!usage) return undefined;
+  return {
+    inputTokens: usage.promptTokenCount,
+    outputTokens: usage.candidatesTokenCount,
+    totalTokens: usage.totalTokenCount,
+  };
+}
+
+/**
  * Routes a generateContent call through the shared client. When a log entry
  * (from `startLog`) is passed, the wrapper finishes it — success on response,
  * error with a normalized message and honest cost state on failure — and
  * always rethrows the original error so callers keep full fidelity for their
- * own handling.
+ * own handling. On success, token counts from `response.usageMetadata` are
+ * attached to the log entry before it is finished.
  */
 export async function generateContent(
   params: GenerateContentParameters,
@@ -95,7 +125,15 @@ export async function generateContent(
 ): Promise<GenerateContentResponse> {
   try {
     const response = await getAI().models.generateContent(params);
-    if (log) finishLog(log);
+    if (log) {
+      const usage = extractTokenUsage(response);
+      if (usage) {
+        log.inputTokens = usage.inputTokens;
+        log.outputTokens = usage.outputTokens;
+        log.totalTokens = usage.totalTokens;
+      }
+      finishLog(log);
+    }
     return response;
   } catch (err) {
     if (log) finishLog(log, normalizeErrorMessage(err), extractFailureCost(err));
