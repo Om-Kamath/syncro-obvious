@@ -6,6 +6,8 @@ import { ClipEditor } from './components/ClipEditor';
 import { VoiceoverEditor } from './components/VoiceoverEditor';
 import { PostProcessingPanel } from './components/PostProcessingPanel';
 import { LogPanel } from './components/LogPanel';
+import { ToastContainer } from './components/ToastContainer';
+import { toast } from './services/toastStore';
 import {
   analyzeVoiceover,
   analyzeVideo,
@@ -348,9 +350,10 @@ export default function App() {
     try {
       const result = await generateAudioFromScript(script, voice);
       replaceVoiceover({ url: result.url, duration: result.duration, transcription: result.transcription });
+      toast.success('Voiceover audio generated');
     } catch (err) {
       console.error('TTS generation failed:', err);
-      alert(`Failed to generate audio: ${err instanceof Error ? err.message : String(err)}`);
+      toast.error(`Failed to generate audio: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       setIsGeneratingAudio(false);
     }
@@ -369,9 +372,10 @@ export default function App() {
         updatedClips.map(c => ({ name: c.name, analysis: c.analysis ?? '', duration: c.duration })), voice
       );
       replaceVoiceover({ url: result.url, duration: result.duration, transcription: result.transcription });
+      toast.success('Narration voiceover generated');
     } catch (err) {
       console.error('Narration generation failed:', err);
-      alert(`Failed to generate narration: ${err instanceof Error ? err.message : String(err)}`);
+      toast.error(`Failed to generate narration: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       setIsGeneratingAudio(false);
     }
@@ -428,7 +432,7 @@ export default function App() {
       setVideoClips(chainClips(orderedClips));
     } catch (error) {
       console.error('Alignment failed:', error);
-      alert('Failed to align clips. Please try again.');
+      toast.error('Failed to align clips. Please try again.');
     } finally {
       setIsAligning(false);
     }
@@ -754,6 +758,8 @@ export default function App() {
       )}
 
       {showLogs && <LogPanel onClose={() => setShowLogs(false)} />}
+
+      <ToastContainer />
 
       {/* Export Modal */}
       <AnimatePresence>
