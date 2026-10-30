@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -32,6 +32,9 @@ import { CAPTION_PRESETS, CAPTION_PRESET_ORDER, applyPreset } from '../utils/cap
 import { listTemplates, saveTemplate, deleteTemplate, applyTemplate, loadTemplatesResult } from '../services/captionTemplates';
 import { parseCaptionFile, segmentsToTranscription } from '../utils/captionImport';
 import type { CaptionTemplate } from '../types';
+import { estimateDescriptionCost, estimateKeyMomentsCost } from '../services/costEstimate';
+import type { PostProcessingInput } from '../services/costEstimate';
+import { CostEstimateBadge } from './CostEstimateBadge';
 import { EXPORT_PRESETS, DEFAULT_EXPORT_PRESET, computeDrawGeometry, type ExportPresetId } from '../utils/exportPresets';
 import { audioChannelsOf, mixAudio, sliceAudioWindow, toAudioBuffer } from '../utils/audioMix';
 import { MusicPanel, DEFAULT_MUSIC_VOLUME } from './MusicPanel';
@@ -44,9 +47,28 @@ import {
   formatEstimatedSize,
   type QualityPresetId,
 } from '../utils/qualityPresets';
+import { drawCaptionOnCanvas } from '../utils/captionDraw';
+import {
+  computeGifFramePlan,
+  getTimelineDurationSec,
+  renderGif,
+  GifExportCancelledError,
+  GIF_FPS_OPTIONS,
+  GIF_WIDTH_OPTIONS,
+  MAX_GIF_FRAMES,
+} from '../utils/gifExport';
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
+}
+
+/** Shared input-size mapping for the post-processing cost estimators. */
+function postProcessingEstimateInput(voiceover: Voiceover, videoClips: VideoClip[]): PostProcessingInput {
+  return {
+    transcriptionChars: voiceover.transcription?.length ?? 0,
+    segmentChars: voiceover.segments?.reduce((s, seg) => s + seg.text.length, 0) ?? 0,
+    analysisChars: videoClips.reduce((s, c) => s + (c.analysis?.length ?? 0), 0),
+  };
 }
 
 // ── Tab button ──────────────────────────────────────────────────────────────
@@ -191,25 +213,28 @@ export function DescriptionTab({ voiceover, videoClips }: { voiceover: Voiceover
           <p className="text-sm font-semibold text-gray-900">YouTube-Style Description</p>
           <p className="text-xs text-gray-400 mt-0.5">Auto-generated summary + chapter timestamps</p>
         </div>
-        <button
-          onClick={handleGenerate}
-          disabled={isGenerating}
-          className={cn(
-            'flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-xl transition-all',
-            isGenerating
-              ? 'bg-gray-100 text-gray-400 cursor-wait'
-              : 'bg-violet-600 text-white hover:bg-violet-700 shadow-sm shadow-violet-200'
-          )}
-        >
-          {isGenerating ? (
-            <Loader2 className="w-4 h-4 animate-spin" />
-          ) : description ? (
-            <RefreshCw className="w-4 h-4" />
-          ) : (
-            <Wand2 className="w-4 h-4" />
-          )}
-          {isGenerating ? 'Generating…' : description ? 'Regenerate' : 'Generate'}
-        </button>
+        <div className="flex items-center gap-3">
+          <CostEstimateBadge estimate={estimateDescriptionCost(postProcessingEstimateInput(voiceover, videoClips))} />
+          <button
+            onClick={handleGenerate}
+            disabled={isGenerating}
+            className={cn(
+              'flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-xl transition-all',
+              isGenerating
+                ? 'bg-gray-100 text-gray-400 cursor-wait'
+                : 'bg-violet-600 text-white hover:bg-violet-700 shadow-sm shadow-violet-200'
+            )}
+          >
+            {isGenerating ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : description ? (
+              <RefreshCw className="w-4 h-4" />
+            ) : (
+              <Wand2 className="w-4 h-4" />
+            )}
+            {isGenerating ? 'Generating…' : description ? 'Regenerate' : 'Generate'}
+          </button>
+        </div>
       </div>
 
       {error && (
@@ -789,25 +814,28 @@ export function ThumbnailsTab({
             AI finds the most compelling moments and overlays a key quote
           </p>
         </div>
-        <button
-          onClick={handleGenerate}
-          disabled={isGenerating}
-          className={cn(
-            'flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-xl transition-all',
-            isGenerating
-              ? 'bg-gray-100 text-gray-400 cursor-wait'
-              : 'bg-violet-600 text-white hover:bg-violet-700 shadow-sm shadow-violet-200'
-          )}
-        >
-          {isGenerating ? (
-            <Loader2 className="w-4 h-4 animate-spin" />
-          ) : thumbnails.length > 0 ? (
-            <RefreshCw className="w-4 h-4" />
-          ) : (
-            <Wand2 className="w-4 h-4" />
-          )}
-          {isGenerating ? 'Generating…' : thumbnails.length > 0 ? 'Regenerate' : 'Generate'}
-        </button>
+        <div className="flex items-center gap-3">
+          <CostEstimateBadge estimate={estimateKeyMomentsCost(postProcessingEstimateInput(voiceover, videoClips))} />
+          <button
+            onClick={handleGenerate}
+            disabled={isGenerating}
+            className={cn(
+              'flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-xl transition-all',
+              isGenerating
+                ? 'bg-gray-100 text-gray-400 cursor-wait'
+                : 'bg-violet-600 text-white hover:bg-violet-700 shadow-sm shadow-violet-200'
+            )}
+          >
+            {isGenerating ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : thumbnails.length > 0 ? (
+              <RefreshCw className="w-4 h-4" />
+            ) : (
+              <Wand2 className="w-4 h-4" />
+            )}
+            {isGenerating ? 'Generating…' : thumbnails.length > 0 ? 'Regenerate' : 'Generate'}
+          </button>
+        </div>
       </div>
 
       {isGenerating && progress && (
@@ -918,6 +946,13 @@ function ExportTab({
   const [qualityId, setQualityId] = useState<QualityPresetId>(DEFAULT_QUALITY_PRESET);
   const quality = QUALITY_PRESETS[qualityId];
   const stopRef = useRef<(() => void) | null>(null);
+
+  const [gifFps, setGifFps] = useState(10);
+  const [gifWidth, setGifWidth] = useState(360);
+  const [isGifExporting, setIsGifExporting] = useState(false);
+  const [gifProgress, setGifProgress] = useState(0);
+  const [gifError, setGifError] = useState<string | null>(null);
+  const gifCancelRef = useRef(false);
 
   const handleDownloadAsset = (url: string, name: string) => {
     const a = document.createElement('a');
@@ -1083,6 +1118,42 @@ function ExportTab({
       setExportError(e instanceof Error ? e.message : 'Export failed. Check your audio files and try again.');
       setIsExporting(false);
       audioCtx?.close();
+    }
+  };
+
+  const timelineSec = getTimelineDurationSec(videoClips, voiceover);
+  const gifPlan = useMemo(
+    () => computeGifFramePlan({ durationSec: timelineSec, fps: gifFps, width: gifWidth, preset }),
+    [timelineSec, gifFps, gifWidth, preset]
+  );
+
+  const handleExportGif = async () => {
+    if (videoClips.length === 0 || gifPlan.frameCount <= 0) return;
+    setIsGifExporting(true);
+    setGifProgress(0);
+    setGifError(null);
+    gifCancelRef.current = false;
+
+    try {
+      const blob = await renderGif({
+        clips: videoClips,
+        plan: gifPlan,
+        preset,
+        captions: captionsEnabled && voiceover?.segments
+          ? { segments: voiceover.segments, style: captionStyle }
+          : null,
+        onProgress: (done, total) => setGifProgress(done / total),
+        shouldCancel: () => gifCancelRef.current,
+      });
+      const { downloadFile } = await import('../utils/exportUtils');
+      downloadFile(blob, 'syncvoice-export.gif');
+    } catch (e) {
+      if (e instanceof GifExportCancelledError) return; // user-requested stop, not a failure
+      console.error('GIF export failed:', e);
+      setGifError(e instanceof Error ? e.message : 'GIF export failed');
+    } finally {
+      setIsGifExporting(false);
+      setGifProgress(0);
     }
   };
 
@@ -1322,7 +1393,8 @@ function ExportTab({
               {!isExporting ? (
                 <button
                   onClick={handleExportVideo}
-                  className="flex items-center gap-2 px-4 py-2.5 text-sm font-semibold bg-violet-600 text-white rounded-xl hover:bg-violet-500 transition-all"
+                  disabled={isGifExporting}
+                  className="flex items-center gap-2 px-4 py-2.5 text-sm font-semibold bg-violet-600 text-white rounded-xl hover:bg-violet-500 transition-all disabled:opacity-50"
                 >
                   <Film className="w-4 h-4" />
                   Start Export
@@ -1342,53 +1414,115 @@ function ExportTab({
           </div>
         </div>
       )}
+
+      {/* GIF Export */}
+      <div className="space-y-3">
+        <p className="text-xs font-bold uppercase tracking-widest text-violet-500">GIF Export</p>
+        {videoClips.length === 0 ? (
+          <div className="p-4 bg-gray-50 border border-gray-100 rounded-2xl">
+            <p className="text-xs text-gray-400">
+              Add a video clip first — GIFs render from the video timeline.
+            </p>
+          </div>
+        ) : (
+          <div className="p-4 bg-gray-50 border border-gray-100 rounded-2xl space-y-4">
+            <div className="flex items-start gap-3">
+              <div className="w-9 h-9 bg-violet-100 text-violet-600 rounded-xl flex items-center justify-center flex-shrink-0">
+                <Image className="w-4 h-4" />
+              </div>
+              <div>
+                <p className="text-sm font-semibold text-gray-900">Export Animated GIF</p>
+                <p className="text-xs text-violet-500 mt-0.5">
+                  Renders a silent preview loop of the sequence using the aspect preset above —
+                  GIFs carry no audio.
+                </p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label htmlFor="gif-fps" className="block text-xs font-semibold text-gray-900 mb-1.5">Frame Rate</label>
+                <select
+                  id="gif-fps"
+                  value={gifFps}
+                  onChange={e => setGifFps(Number(e.target.value))}
+                  disabled={isGifExporting || isExporting}
+                  className="w-full px-3 py-2 text-xs font-semibold bg-white border border-gray-200 rounded-xl text-gray-700 hover:border-violet-300 focus:outline-none focus:border-violet-400 transition-all disabled:opacity-50"
+                >
+                  {GIF_FPS_OPTIONS.map(f => <option key={f} value={f}>{f} fps</option>)}
+                </select>
+              </div>
+              <div>
+                <label htmlFor="gif-width" className="block text-xs font-semibold text-gray-900 mb-1.5">Width</label>
+                <select
+                  id="gif-width"
+                  value={gifWidth}
+                  onChange={e => setGifWidth(Number(e.target.value))}
+                  disabled={isGifExporting || isExporting}
+                  className="w-full px-3 py-2 text-xs font-semibold bg-white border border-gray-200 rounded-xl text-gray-700 hover:border-violet-300 focus:outline-none focus:border-violet-400 transition-all disabled:opacity-50"
+                >
+                  {GIF_WIDTH_OPTIONS.map(w => <option key={w} value={w}>{w} px</option>)}
+                </select>
+              </div>
+            </div>
+
+            <p className="text-[10px] text-gray-400">
+              {gifPlan.frameCount} frames · {gifPlan.exportDurationSec.toFixed(1)}s loop · {gifPlan.width}×{gifPlan.height} · {gifPlan.fps} fps
+            </p>
+
+            {gifPlan.truncated && (
+              <p className="text-[10px] font-semibold text-amber-600">
+                The clip range exceeds the {MAX_GIF_FRAMES}-frame GIF budget — only the first{' '}
+                {gifPlan.exportDurationSec.toFixed(1)}s will be exported. Lower the frame rate to fit more.
+              </p>
+            )}
+
+            {isGifExporting && (
+              <div className="space-y-2">
+                <div className="flex justify-between text-xs font-medium text-violet-400">
+                  <span>Rendering frames…</span>
+                  <span>{Math.round(gifProgress * 100)}%</span>
+                </div>
+                <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-violet-500 rounded-full"
+                    style={{ width: `${gifProgress * 100}%` }}
+                  />
+                </div>
+              </div>
+            )}
+
+            {gifError && (
+              <p className="text-xs font-semibold text-red-500">{gifError}</p>
+            )}
+
+            <div className="flex gap-3">
+              {!isGifExporting ? (
+                <button
+                  onClick={handleExportGif}
+                  disabled={isExporting}
+                  className="flex items-center gap-2 px-4 py-2.5 text-sm font-semibold bg-violet-600 text-white rounded-xl hover:bg-violet-500 transition-all disabled:opacity-50"
+                >
+                  <Image className="w-4 h-4" />
+                  Export GIF
+                </button>
+              ) : (
+                <button
+                  onClick={() => { gifCancelRef.current = true; }}
+                  className="flex items-center gap-2 px-4 py-2.5 text-sm font-semibold bg-red-900/30 text-red-400 rounded-xl hover:bg-red-900/50 transition-all"
+                >
+                  Cancel
+                </button>
+              )}
+              <span className="flex items-center text-[10px] font-bold text-violet-500 uppercase tracking-wider">
+                GIF · no audio
+              </span>
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
-}
-
-// ── Canvas caption renderer (used during video export recording) ────────────
-function drawCaptionOnCanvas(
-  ctx: CanvasRenderingContext2D,
-  W: number,
-  H: number,
-  text: string,
-  style: CaptionStyle
-) {
-  const fontSize = Math.max(16, Math.round(W * 0.032));
-  ctx.font = `bold ${fontSize}px Inter, Arial, sans-serif`;
-  ctx.textAlign = 'center';
-
-  const maxW = W * 0.8;
-  const words = text.split(' ').filter(Boolean);
-  if (words.length === 0) return;
-  const lines: string[] = [];
-  let cur = '';
-  for (const w of words) {
-    const test = cur ? `${cur} ${w}` : w;
-    if (ctx.measureText(test).width > maxW && cur) { lines.push(cur); cur = w; } else cur = test;
-  }
-  if (cur) lines.push(cur);
-  if (lines.length === 0) return;
-
-  const lh = fontSize * 1.35;
-  const padX = 20;
-  const padY = 10;
-  const boxH = lines.length * lh + padY * 2;
-  const maxLineWidth = lines.reduce((m, l) => Math.max(m, ctx.measureText(l).width), 0);
-  const boxW = Math.min(maxLineWidth + padX * 2, W - 40);
-  const boxX = (W - boxW) / 2;
-  const boxY = style.position === 'bottom' ? H - boxH - 32 : 32;
-
-  ctx.fillStyle = style.bgColor;
-  ctx.beginPath();
-  if (ctx.roundRect) ctx.roundRect(boxX, boxY, boxW, boxH, 6);
-  else ctx.rect(boxX, boxY, boxW, boxH);
-  ctx.fill();
-
-  ctx.fillStyle = style.color;
-  lines.forEach((line, i) => {
-    ctx.fillText(line, W / 2, boxY + padY + (i + 0.82) * lh, maxW);
-  });
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
