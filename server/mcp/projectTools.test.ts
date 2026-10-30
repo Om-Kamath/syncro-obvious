@@ -256,6 +256,11 @@ describe('update_project', () => {
 
     expect(record.name).toBe('After');
     expect(record.state.clips).toHaveLength(2);
+    // The API always returns both timestamps (SQLite defaults); the shared
+    // type marks them optional for client-side snapshots, so narrow explicitly.
+    if (typeof record.createdAt !== 'string' || typeof record.updatedAt !== 'string') {
+      throw new Error('expected the API to return createdAt/updatedAt timestamps');
+    }
     expect(record.updatedAt >= record.createdAt).toBe(true);
 
     // Read back over HTTP to verify server-side state.
