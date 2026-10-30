@@ -1,5 +1,15 @@
 export type LogStatus = 'pending' | 'success' | 'error';
 
+/**
+ * Cost state for a finished call. `billed` is true only when the API reports
+ * token usage — a call that fails before any tokens are consumed is logged as
+ * 0 tokens / not billed rather than left blank.
+ */
+export interface FailureCost {
+  tokensConsumed: number;
+  billed: boolean;
+}
+
 export interface LogEntry {
   id: string;
   timestamp: Date;
@@ -9,6 +19,8 @@ export interface LogEntry {
   detail: string;      // short description of the input
   durationMs?: number; // set on success/error
   error?: string;
+  tokensConsumed?: number; // set when the call finishes with observed cost state
+  billed?: boolean;        // false = the failure cost nothing
 }
 
 type Listener = (entries: LogEntry[]) => void;
@@ -40,9 +52,16 @@ export function startLog(fn: string, model: string, detail: string): LogEntry {
   return entry;
 }
 
-export function finishLog(entry: LogEntry, error?: string) {
+export function finishLog(entry: LogEntry, error?: string, cost?: FailureCost) {
   entry.durationMs = Date.now() - entry.timestamp.getTime();
   entry.status = error ? 'error' : 'success';
   if (error) entry.error = error;
+  // Cost is only set when provided: a caller re-finishing an entry (e.g. the
+  // outer catch in gemini.ts after the wrapper already recorded cost) must
+  // not wipe the captured state.
+  if (cost) {
+    entry.tokensConsumed = cost.tokensConsumed;
+    entry.billed = cost.billed;
+  }
   notify();
 }
