@@ -393,7 +393,7 @@ export const Timeline: React.FC<TimelineProps> = ({
       onVideoClipChange(videoClipsRef.current.map((c: VideoClip) => {
         if (c.id !== drag.id) return c;
         // Main's semantic snapping first (neighbors/playhead in timeline
-        // space), then trimClip applies the delta from the drag-start
+        // space), then trimFrom applies the delta from the drag-start
         // snapshot with frame-grid snapping and clamping.
         const snapshot = {
           ...c,
@@ -404,11 +404,11 @@ export const Timeline: React.FC<TimelineProps> = ({
         if (drag.side === 'right') {
           const rawEnd = drag.origStartTime + drag.origTrimmedDuration + deltaSec;
           const snappedEnd = findSnap(rawEnd, snapTargets(drag.id), pixelsPerSecond).time;
-          return trimClip(snapshot, 'right', snappedEnd - (drag.origStartTime + drag.origTrimmedDuration));
+          return trimFrom(snapshot, 'right', snappedEnd - (drag.origStartTime + drag.origTrimmedDuration));
         }
         const rawStart = drag.origStartTime + deltaSec;
         const snappedStart = findSnap(rawStart, snapTargets(drag.id), pixelsPerSecond).time;
-        return trimClip(snapshot, 'left', snappedStart - drag.origStartTime);
+        return trimFrom(snapshot, 'left', snappedStart - drag.origStartTime);
       }));
     };
     const onUp = () => { trimDragRef.current = null; setDraggingTrimId(null); };
