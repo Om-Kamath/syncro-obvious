@@ -576,17 +576,26 @@ function CaptionsTab({
 // ═══════════════════════════════════════════════════════════════════════════
 // TAB 3 — Thumbnails
 // ═══════════════════════════════════════════════════════════════════════════
-export function ThumbnailsTab({ voiceover, videoClips }: { voiceover: Voiceover; videoClips: VideoClip[] }) {
+export function ThumbnailsTab({
+  voiceover,
+  videoClips,
+  importedThumbnails = [],
+}: {
+  voiceover: Voiceover | null;
+  videoClips: VideoClip[];
+  importedThumbnails?: ThumbnailCandidate[];
+}) {
   const [thumbnails, setThumbnails] = useState<ThumbnailCandidate[]>([]);
   const [isGenerating, setIsGenerating] = useState(false);
   const [progress, setProgress] = useState('');
   const [error, setError] = useState('');
 
   const canGenerate =
-    !!voiceover.transcription && !!voiceover.segments?.length && videoClips.length > 0;
+    !!voiceover?.transcription && !!voiceover?.segments?.length && videoClips.length > 0;
+  const allThumbnails = [...thumbnails, ...importedThumbnails];
 
   const handleGenerate = async () => {
-    if (!voiceover.transcription || !voiceover.segments) return;
+    if (!voiceover?.transcription || !voiceover.segments) return;
     setIsGenerating(true);
     setError('');
     setProgress('Asking AI to identify key moments…');
@@ -630,9 +639,28 @@ export function ThumbnailsTab({ voiceover, videoClips }: { voiceover: Voiceover;
     }
   };
 
+  // Imported images are viewable without AI analysis; only the fully empty
+  // state is locked.
+  if (!canGenerate && importedThumbnails.length === 0) {
+    return (
+      <LockedState
+        message={
+          voiceover
+            ? 'Upload videos and run AI Auto-Align first to enable thumbnail generation.'
+            : 'Upload a voiceover and run AI Auto-Align to generate thumbnails.'
+        }
+      />
+    );
+  }
+
   if (!canGenerate) {
     return (
-      <LockedState message="Upload videos and run AI Auto-Align first to enable thumbnail generation." />
+      <div className="space-y-5">
+        <p className="text-xs text-violet-500">
+          Imported images appear here. Run AI Auto-Align to unlock AI thumbnail generation.
+        </p>
+        <ThumbnailGrid items={importedThumbnails} />
+      </div>
     );
   }
 
@@ -679,54 +707,68 @@ export function ThumbnailsTab({ voiceover, videoClips }: { voiceover: Voiceover;
         </div>
       )}
 
-      <AnimatePresence>
-        {thumbnails.length > 0 && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            className="grid grid-cols-2 gap-4"
-          >
-            {thumbnails.map((thumb, i) => (
-              <motion.div
-                key={thumb.id}
-                initial={{ opacity: 0, scale: 0.95 }}
-                animate={{ opacity: 1, scale: 1 }}
-                transition={{ delay: i * 0.05 }}
-                className="group rounded-2xl border border-gray-200 overflow-hidden bg-gray-50 hover:border-violet-400 hover:shadow-lg hover:shadow-violet-200/50 transition-all"
-              >
-                <div className="relative aspect-video bg-black/50">
-                  <img
-                    src={thumb.imageDataUrl}
-                    alt={thumb.quote}
-                    className="w-full h-full object-cover"
-                  />
+      <ThumbnailGrid items={allThumbnails} />
+    </div>
+  );
+}
+
+function ThumbnailGrid({ items }: { items: ThumbnailCandidate[] }) {
+  return (
+    <AnimatePresence>
+      {items.length > 0 && (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          className="grid grid-cols-2 gap-4"
+        >
+          {items.map((thumb, i) => (
+            <motion.div
+              key={thumb.id}
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              transition={{ delay: i * 0.05 }}
+              className="group rounded-2xl border border-gray-200 overflow-hidden bg-gray-50 hover:border-violet-400 hover:shadow-lg hover:shadow-violet-200/50 transition-all"
+            >
+              <div className="relative aspect-video bg-black/50">
+                <img
+                  src={thumb.imageDataUrl}
+                  alt={thumb.quote}
+                  className="w-full h-full object-cover"
+                />
+                {thumb.source !== 'imported' && (
                   <div className="absolute top-2 left-2">
                     <span className="px-2 py-0.5 bg-black/60 text-white text-[10px] font-mono rounded-md">
                       {formatChapterTime(thumb.timestamp)}
                     </span>
                   </div>
-                </div>
-                <div className="p-3 space-y-2">
-                  <p className="text-xs font-semibold text-gray-900 line-clamp-1">"{thumb.quote}"</p>
-                  <p className="text-[10px] text-violet-500 line-clamp-2">{thumb.reason}</p>
-                  <button
-                    onClick={() =>
-                      downloadDataUrl(thumb.imageDataUrl, `thumbnail-${i + 1}-${thumb.timestamp}s.jpg`)
-                    }
-                    className="flex items-center gap-1.5 w-full justify-center py-1.5 text-xs font-semibold bg-gray-100 border border-gray-200 text-violet-400 rounded-lg hover:bg-violet-50 hover:text-violet-600 hover:border-violet-400 transition-all"
-                  >
-                    <Download className="w-3.5 h-3.5" />
-                    Download PNG
-                  </button>
-                </div>
-              </motion.div>
-            ))}
-          </motion.div>
-        )}
-      </AnimatePresence>
-    </div>
+                )}
+              </div>
+              <div className="p-3 space-y-2">
+                <p className="text-xs font-semibold text-gray-900 line-clamp-1">"{thumb.quote}"</p>
+                <p className="text-[10px] text-violet-500 line-clamp-2">{thumb.reason}</p>
+                <button
+                  onClick={() =>
+                    downloadDataUrl(
+                      thumb.imageDataUrl,
+                      thumb.source === 'imported'
+                        ? thumb.quote
+                        : `thumbnail-${i + 1}-${thumb.timestamp}s.jpg`
+                    )
+                  }
+                  className="flex items-center gap-1.5 w-full justify-center py-1.5 text-xs font-semibold bg-gray-100 border border-gray-200 text-violet-400 rounded-lg hover:bg-violet-50 hover:text-violet-600 hover:border-violet-400 transition-all"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  Download PNG
+                </button>
+              </div>
+            </motion.div>
+          ))}
+        </motion.div>
+      )}
+    </AnimatePresence>
   );
 }
+
 
 // ═══════════════════════════════════════════════════════════════════════════
 // TAB 4 — Export
@@ -1201,6 +1243,7 @@ interface PostProcessingPanelProps {
   captionsEnabled: boolean;
   onCaptionStyleChange: (s: CaptionStyle) => void;
   onCaptionsEnabledChange: (v: boolean) => void;
+  importedThumbnails?: ThumbnailCandidate[];
 }
 
 export function PostProcessingPanel({
@@ -1210,6 +1253,7 @@ export function PostProcessingPanel({
   captionsEnabled,
   onCaptionStyleChange,
   onCaptionsEnabledChange,
+  importedThumbnails = [],
 }: PostProcessingPanelProps) {
   const [activeTab, setActiveTab] = useState<Tab>('description');
 
@@ -1224,7 +1268,13 @@ export function PostProcessingPanel({
   }[] = [
     { id: 'description', label: 'Description', icon: FileText, locked: !hasTranscription },
     { id: 'captions', label: 'Captions', icon: MessageSquare, locked: !hasTranscription },
-    { id: 'thumbnails', label: 'Thumbnails', icon: Image, locked: !hasTranscription || !hasClips },
+    {
+      id: 'thumbnails',
+      label: 'Thumbnails',
+      icon: Image,
+      // Imported images are browsable without AI analysis.
+      locked: (!hasTranscription || !hasClips) && importedThumbnails.length === 0,
+    },
     { id: 'export', label: 'Export', icon: Download, locked: false },
   ];
 
@@ -1298,9 +1348,11 @@ export function PostProcessingPanel({
             />
           )}
           {activeTab === 'thumbnails' && (
-            voiceover
-              ? <ThumbnailsTab voiceover={voiceover} videoClips={videoClips} />
-              : <LockedState message="Upload a voiceover and run AI Auto-Align to generate thumbnails." />
+            <ThumbnailsTab
+              voiceover={voiceover}
+              videoClips={videoClips}
+              importedThumbnails={importedThumbnails}
+            />
           )}
           {activeTab === 'export' && (
             <ExportTab
