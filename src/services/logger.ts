@@ -21,6 +21,11 @@ export interface LogEntry {
   error?: string;
   tokensConsumed?: number; // set when the call finishes with observed cost state
   billed?: boolean;        // false = the failure cost nothing
+  // Token accounting from the response's usageMetadata (set on success when
+  // the model reports counts). Named for cost math, not the SDK's ids.
+  inputTokens?: number;  // usageMetadata.promptTokenCount
+  outputTokens?: number; // usageMetadata.candidatesTokenCount
+  totalTokens?: number;  // usageMetadata.totalTokenCount
 }
 
 type Listener = (entries: LogEntry[]) => void;
