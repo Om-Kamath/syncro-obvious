@@ -34,20 +34,11 @@ import {
   Key,
 } from 'lucide-react';
 import { setApiKey, hasApiKey } from './services/apiKey';
+import { chainClips } from './utils/chainClips';
 import { motion, AnimatePresence } from 'motion/react';
 
 function cn(...classes: (string | boolean | undefined | null)[]): string {
   return classes.filter(Boolean).join(' ');
-}
-
-function chainClips(clips: VideoClip[]): VideoClip[] {
-  if (clips.length === 0) return [];
-  let cursor = 0;
-  return clips.map(clip => {
-    const positioned = { ...clip, startTime: cursor };
-    cursor += clip.trimmedDuration ?? clip.duration;
-    return positioned;
-  });
 }
 
 function CaptionOverlay({
