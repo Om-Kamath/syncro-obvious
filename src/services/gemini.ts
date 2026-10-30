@@ -1,14 +1,8 @@
-import { GoogleGenAI, Type, FileState } from "@google/genai";
+import { Type, FileState } from "@google/genai";
 import { startLog, finishLog } from "./logger";
-import { getApiKey } from "./apiKey";
+import { generateContent, getAI } from "./geminiClient";
 import { MODELS } from "./models";
 import { LruCache } from "../utils/lruCache";
-
-function getAI() {
-  const apiKey = getApiKey();
-  if (!apiKey) throw new Error('No Gemini API key set. Click the key icon in the header to add one.');
-  return new GoogleGenAI({ apiKey });
-}
 
 // -------------------------------------------------------------------
 // Files API — upload once, reuse URI across calls
@@ -108,7 +102,7 @@ export async function generateAudioFromScript(
         responseModalities: ['AUDIO'],
         speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName } } },
       },
-    });
+    }, log);
 
     const part = response.candidates?.[0]?.content?.parts?.[0] as { inlineData?: { data?: string; mimeType?: string } } | undefined;
     if (!part?.inlineData?.data) throw new Error('No audio returned from TTS');
@@ -116,7 +110,6 @@ export async function generateAudioFromScript(
     const wavBytes = inlineAudioToWavBytes(part.inlineData.data, part.inlineData.mimeType);
     const url = URL.createObjectURL(new Blob([wavBytes], { type: 'audio/wav' }));
     const duration = await getAudioDuration(url);
-    finishLog(log);
     return { url, duration, transcription: script };
   } catch (err) {
     finishLog(log, err?.message ?? String(err));
@@ -140,10 +133,9 @@ Do NOT include stage directions, timestamps, or labels. Output only the words to
 
 Video clips:
 ${videoClips.map((c, i) => `Clip ${i + 1} (${c.duration.toFixed(1)}s) — "${c.name}": ${c.analysis}`).join('\n')}`,
-    });
+    }, log);
 
     const script = scriptResponse.text?.trim() || 'No narration could be generated.';
-    finishLog(log);
     return generateAudioFromScript(script, voiceName);
   } catch (err) {
     finishLog(log, err?.message ?? String(err));
@@ -200,11 +192,10 @@ export async function analyzeVoiceover(
         ],
       },
       config: { temperature: 0 },
-    });
+    }, log);
 
     const transcription = response.text?.trim() ?? '';
     const segments = estimateSegments(transcription, totalDuration);
-    finishLog(log);
     return { transcription, segments };
   } catch (err) {
     finishLog(log, err?.message ?? String(err));
@@ -226,10 +217,9 @@ export async function analyzeVideo(videoFile: File): Promise<string> {
           { text: 'Describe the content of this video clip in detail. What is happening? What are the key visual elements?' },
         ],
       },
-    });
+    }, log);
 
     const result = response.text || 'No analysis available.';
-    finishLog(log);
     return result;
   } catch (err) {
     finishLog(log, err?.message ?? String(err));
@@ -302,10 +292,9 @@ Return a JSON array with one object per position, each containing:
           },
         },
       },
-    });
+    }, log);
 
     const entries: AlignmentEntry[] = JSON.parse(response.text || '[]');
-    finishLog(log);
     return entries;
   } catch (err) {
     finishLog(log, err?.message ?? String(err));
