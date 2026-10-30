@@ -1,11 +1,17 @@
-
-import React, { Suspense, useState, useRef, useEffect } from 'react';
-import { VideoClip, Voiceover, CaptionStyle, CaptionSegment } from './types';
+import React, { Suspense, useState, useRef, useEffect, useCallback } from 'react';
+import { VideoClip, Voiceover, CaptionStyle, CaptionSegment, ThumbnailCandidate } from './types';
 import { FileUploader } from './components/FileUploader';
+import { MediaDropLayer, type ImportedMedia } from './components/MediaDropLayer';
+import { Toast, type ToastState } from './components/Toast';
 import { Timeline } from './components/Timeline';
+import type { TimelineTransport } from './components/Timeline';
+import { resolveShortcut, getShortcutContext } from './utils/keyboardShortcuts';
+import type { TimelineShortcutAction } from './utils/keyboardShortcuts';
 import { ClipEditor } from './components/ClipEditor';
 import { VoiceoverEditor } from './components/VoiceoverEditor';
 import { LogPanel } from './components/LogPanel';
+import { ToastContainer } from './components/ToastContainer';
+import { toast } from './services/toastStore';
 import {
   analyzeVoiceover,
   analyzeVideo,
@@ -34,8 +40,9 @@ import {
   Key,
 } from 'lucide-react';
 import { setApiKey, hasApiKey } from './services/apiKey';
-import { chainClips } from './utils/chainClips';
+import { chainClips, rippleDeleteMany } from './utils/chainClips';
 import { resolveWordTimings, findActiveWordIndex } from './utils/wordTiming';
+import { captureFilmstrip } from './utils/clipThumbnails';
 import { motion, AnimatePresence } from 'motion/react';
 
 // Heavy Gemini export UI — code-split so it lands in its own chunk and is
@@ -46,6 +53,24 @@ const PostProcessingPanel = React.lazy(() =>
 
 function cn(...classes: (string | boolean | undefined | null)[]): string {
   return classes.filter(Boolean).join(' ');
+}
+
+// Kick off filmstrip generation per imported clip; updates state as each strip
+// lands. Clips render in their plain style until then — the filmstrip is a
+// progressive enhancement, so a total capture failure only downgrades visuals.
+function attachFilmstrips(
+  clips: VideoClip[],
+  setVideoClips: (update: (prev: VideoClip[]) => VideoClip[]) => void,
+) {
+  for (const clip of clips) {
+    if (clip.duration <= 0) continue;
+    captureFilmstrip(clip.url, clip.duration)
+      .then(thumbnails => {
+        if (thumbnails.length === 0) return;
+        setVideoClips(prev => prev.map(c => (c.id === clip.id ? { ...c, thumbnails } : c)));
+      })
+      .catch(err => console.warn(`Filmstrip capture failed for "${clip.name}"`, err));
+  }
 }
 
 function CaptionOverlay({
@@ -101,7 +126,7 @@ type VoiceoverMethod = 'upload' | 'script' | 'auto';
 
 function OnboardingModal({
   step, onStepComplete, onVideoUpload, videoClips, onVoiceoverUpload,
-  onGenerateFromScript, onGenerateNarration, isGenerating,
+  onGenerateFromScript, onGenerateNarration, isGenerating, onUploadRejected,
 }: {
   step: 1 | 2;
   onStepComplete: () => void;
@@ -111,6 +136,7 @@ function OnboardingModal({
   onGenerateFromScript: (script: string, voice: string) => Promise<void>;
   onGenerateNarration: (voice: string) => Promise<void>;
   isGenerating: boolean;
+  onUploadRejected?: (files: File[]) => void;
 }) {
   const [voiceoverMethod, setVoiceoverMethod] = useState<VoiceoverMethod | null>(null);
   const [script, setScript] = useState('');
@@ -162,7 +188,7 @@ function OnboardingModal({
                   <h2 className="text-2xl font-bold text-gray-900 tracking-tight">Upload your videos</h2>
                   <p className="text-sm text-gray-500 mt-1">Add all the video clips you want to sync with a voiceover.</p>
                 </div>
-                <FileUploader label="Add Videos" accept={{ 'video/*': ['.mp4', '.mov', '.webm'] }} onFilesAdded={onVideoUpload} icon={<Upload className="w-6 h-6" />} />
+                <FileUploader label="Add Videos" accept={{ 'video/*': ['.mp4', '.mov', '.webm'] }} onFilesAdded={onVideoUpload} onRejected={onUploadRejected} icon={<Upload className="w-6 h-6" />} />
                 {videoClips.length > 0 && (
                   <div className="space-y-2 max-h-52 overflow-y-auto">
                     {videoClips.map(clip => (
@@ -216,6 +242,7 @@ function OnboardingModal({
                     <motion.div key="upload-in" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden">
                       <FileUploader label="Upload Voiceover" accept={{ 'audio/*': ['.mp3', '.wav', '.m4a'] }}
                         onFilesAdded={async (files) => { await onVoiceoverUpload(files); onStepComplete(); }}
+                        onRejected={onUploadRejected}
                         multiple={false} icon={<Music className="w-5 h-5" />} />
                     </motion.div>
                   )}
@@ -283,7 +310,10 @@ export default function App() {
   const [showLogs, setShowLogs] = useState(false);
   const [showApiKeyModal, setShowApiKeyModal] = useState(!hasApiKey());
   const [apiKeyInput, setApiKeyInput] = useState('');
+  const [toast, setToast] = useState<ToastState | null>(null);
+  const [importedThumbnails, setImportedThumbnails] = useState<ThumbnailCandidate[]>([]);
   const videoRefs = useRef<Record<string, HTMLVideoElement>>({});
+  const transportRef = useRef<TimelineTransport | null>(null);
   const [previewHeight, setPreviewHeight] = useState(260);
   const isResizingPreview = useRef(false);
   const resizeStartY = useRef(0);
@@ -299,6 +329,37 @@ export default function App() {
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);
     return () => { window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); };
+  }, []);
+
+  const handleTransportReady = useCallback((transport: TimelineTransport | null) => {
+    transportRef.current = transport;
+  }, []);
+
+  // Global timeline shortcuts: the pure keymap decides, this routes actions
+  // into the Timeline's transport. Keys owned by a focused control (text
+  // fields, buttons, sliders — including the a11y behavior from PR #11) never
+  // reach here, so the two layers cannot collide.
+  useEffect(() => {
+    const applyAction = (action: TimelineShortcutAction) => {
+      const transport = transportRef.current;
+      if (action.type === 'toggle-play') transport?.togglePlay();
+      else if (action.type === 'pause') transport?.pause();
+      else transport?.seekBy(action.deltaSeconds);
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      const action = resolveShortcut(
+        { key: e.key, ctrlKey: e.ctrlKey, metaKey: e.metaKey, altKey: e.altKey },
+        getShortcutContext(e.target),
+      );
+      if (!action) return;
+      // Held Space/K must not machine-gun playback state; hold-to-scrub on
+      // seeks is intentional.
+      if (e.repeat && (action.type === 'toggle-play' || action.type === 'pause')) return;
+      e.preventDefault();
+      applyAction(action);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
   }, []);
 
   useEffect(() => {
@@ -339,6 +400,7 @@ export default function App() {
       return { id: Math.random().toString(36).substr(2, 9), file, url, duration, startTime: 0, name: file.name };
     }));
     setVideoClips(prev => [...prev, ...newClips]);
+    attachFilmstrips(newClips, setVideoClips);
   };
 
   const handleVoiceoverUpload = async (files: File[]) => {
@@ -349,14 +411,52 @@ export default function App() {
     replaceVoiceover({ file, url, duration });
   };
 
+  const showToast = (kind: ToastState['kind'], message: string) => setToast({ kind, message });
+
+  const describeFiles = (files: File[]) => files.map(f => `"${f.name}"`).join(', ');
+
+  const handleAppDropImport = ({ videos, audios, images }: ImportedMedia) => {
+    if (videos.length > 0) {
+      void handleVideoUpload(videos)
+        .then(() => showToast('success', `Imported ${videos.length} video${videos.length > 1 ? 's' : ''}`))
+        .catch(() => showToast('error', 'Failed to import videos'));
+    }
+    if (audios.length > 0) {
+      void handleVoiceoverUpload(audios)
+        .then(() => showToast('success', `Voiceover set to "${audios[0].name}"`))
+        .catch(() => showToast('error', 'Failed to import voiceover'));
+    }
+    if (images.length > 0) {
+      const candidates: ThumbnailCandidate[] = images.map(file => ({
+        id: `imported-${Math.random().toString(36).slice(2, 9)}`,
+        timestamp: 0,
+        quote: file.name,
+        reason: 'Imported image',
+        imageDataUrl: URL.createObjectURL(file),
+        source: 'imported' as const,
+      }));
+      setImportedThumbnails(prev => [...prev, ...candidates]);
+      showToast('success', `Imported ${images.length} image${images.length > 1 ? 's' : ''} — available in Export → Thumbnails`);
+    }
+  };
+
+  const handleAppDropRejected = (files: File[]) => {
+    showToast('error', `Unsupported file type: ${describeFiles(files)}. Drop video, audio, or image files.`);
+  };
+
+  const rejectNonVideos = (files: File[]) => {
+    showToast('error', `Unsupported file type: ${describeFiles(files)}. The video uploader accepts video files.`);
+  };
+
   const handleGenerateFromScript = async (script: string, voice: string) => {
     setIsGeneratingAudio(true);
     try {
       const result = await generateAudioFromScript(script, voice);
       replaceVoiceover({ url: result.url, duration: result.duration, transcription: result.transcription });
+      toast.success('Voiceover audio generated');
     } catch (err) {
       console.error('TTS generation failed:', err);
-      alert(`Failed to generate audio: ${err instanceof Error ? err.message : String(err)}`);
+      toast.error(`Failed to generate audio: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       setIsGeneratingAudio(false);
     }
@@ -375,9 +475,10 @@ export default function App() {
         updatedClips.map(c => ({ name: c.name, analysis: c.analysis ?? '', duration: c.duration })), voice
       );
       replaceVoiceover({ url: result.url, duration: result.duration, transcription: result.transcription });
+      toast.success('Narration voiceover generated');
     } catch (err) {
       console.error('Narration generation failed:', err);
-      alert(`Failed to generate narration: ${err instanceof Error ? err.message : String(err)}`);
+      toast.error(`Failed to generate narration: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       setIsGeneratingAudio(false);
     }
@@ -434,17 +535,22 @@ export default function App() {
       setVideoClips(chainClips(orderedClips));
     } catch (error) {
       console.error('Alignment failed:', error);
-      alert('Failed to align clips. Please try again.');
+      toast.error('Failed to align clips. Please try again.');
     } finally {
       setIsAligning(false);
     }
   };
 
-  const removeVideo = (id: string) => {
-    const clip = videoClips.find(c => c.id === id);
-    if (clip) URL.revokeObjectURL(clip.url);
-    setVideoClips(videoClips.filter(c => c.id !== id));
+  const removeVideos = (ids: string[]) => {
+    setVideoClips(prev => {
+      const idSet = new Set(ids);
+      prev.forEach(c => { if (idSet.has(c.id)) URL.revokeObjectURL(c.url); });
+      // Ripple delete: rechain the remaining clips so no gap is left behind,
+      // whether one clip or a multi-select batch was removed.
+      return rippleDeleteMany(prev, ids);
+    });
   };
+  const removeVideo = (id: string) => removeVideos([id]);
 
   // Revoke the previous voiceover's blob URL whenever it is replaced or
   // removed — otherwise each upload or TTS run leaks the old audio blob.
@@ -459,6 +565,12 @@ export default function App() {
       }
       return next;
     });
+  };
+
+  // An imported SRT/VTT replaces the AI-transcribed/estimated caption track:
+  // same voiceover audio, but cue timings and transcript text from the file.
+  const handleImportCaptions = (segments: CaptionSegment[], transcription: string) => {
+    setVoiceover(prev => prev ? { ...prev, transcription, segments } : prev);
   };
 
   // Swap a clip with one of its alternatives on the timeline (preserves chainClips order)
@@ -493,6 +605,7 @@ export default function App() {
             onGenerateFromScript={handleGenerateFromScript}
             onGenerateNarration={handleGenerateNarration}
             isGenerating={isGeneratingAudio}
+            onUploadRejected={handleAppDropRejected}
           />
         )}
       </AnimatePresence>
@@ -607,7 +720,7 @@ export default function App() {
               <span className="text-[10px] font-bold bg-violet-100 text-violet-600 px-2 py-0.5 rounded-full">{videoClips.length}</span>
             </div>
             <div className="p-4 space-y-3">
-              <FileUploader label="Add Videos" accept={{ 'video/*': ['.mp4', '.mov', '.webm'] }} onFilesAdded={handleVideoUpload} icon={<Video className="w-5 h-5" />} />
+              <FileUploader label="Add Videos" accept={{ 'video/*': ['.mp4', '.mov', '.webm'] }} onFilesAdded={handleVideoUpload} onRejected={rejectNonVideos} icon={<Video className="w-5 h-5" />} />
               <AnimatePresence mode="popLayout">
                 {videoClips.map((clip) => (
                   <motion.div key={clip.id} layout initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95 }}
@@ -748,9 +861,11 @@ export default function App() {
             onAutoAlign={handleAutoAlign}
             onSwapClip={handleSwapClip}
             onDeleteClip={removeVideo}
+            onDeleteClips={removeVideos}
             isAligning={isAligning}
             currentTime={currentTime}
             onTimeUpdate={setCurrentTime}
+            onTransportReady={handleTransportReady}
           />
         </div>
       </main>
@@ -760,6 +875,8 @@ export default function App() {
       )}
 
       {showLogs && <LogPanel onClose={() => setShowLogs(false)} />}
+
+      <ToastContainer />
 
       {/* Export Modal */}
       <AnimatePresence>
@@ -799,6 +916,8 @@ export default function App() {
                     captionsEnabled={captionsEnabled}
                     onCaptionStyleChange={setCaptionStyle}
                     onCaptionsEnabledChange={setCaptionsEnabled}
+                    importedThumbnails={importedThumbnails}
+                    onImportCaptions={handleImportCaptions}
                   />
                 </Suspense>
               </div>
@@ -867,6 +986,9 @@ export default function App() {
           </div>
         )}
       </AnimatePresence>
+
+      <MediaDropLayer onImport={handleAppDropImport} onRejected={handleAppDropRejected} />
+      {toast && <Toast toast={toast} onDismiss={() => setToast(null)} />}
     </div>
   );
 }

@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { subscribe, LogEntry } from '../services/logger';
+import { formatUsd, summarizeCosts } from '../services/costModel';
 import { X, Activity, CheckCircle, XCircle, Loader2, ChevronDown, ChevronRight } from 'lucide-react';
 
 interface LogPanelProps {
@@ -14,6 +15,7 @@ function timeStr(d: Date) {
 export const LogPanel: React.FC<LogPanelProps> = ({ onClose }) => {
   const [entries, setEntries] = useState<LogEntry[]>([]);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const summary = summarizeCosts(entries);
 
   useEffect(() => subscribe(setEntries), []);
 
@@ -75,6 +77,9 @@ export const LogPanel: React.FC<LogPanelProps> = ({ onClose }) => {
                         {entry.billed ? `${entry.tokensConsumed} tok · billed` : 'not billed'}
                       </span>
                     )}
+                    {entry.estimatedCostUsd !== undefined && (
+                      <span className="text-[10px] font-mono text-emerald-600 shrink-0">{formatUsd(entry.estimatedCostUsd)}</span>
+                    )}
                     {entry.status === 'pending' && <span className="text-[10px] text-violet-400 shrink-0 font-mono">…</span>}
                   </div>
                   <div className="flex items-center gap-1.5 mt-0.5">
@@ -97,6 +102,12 @@ export const LogPanel: React.FC<LogPanelProps> = ({ onClose }) => {
                     <div><span className="text-gray-400">input:</span> <span className="break-all">{entry.detail}</span></div>
                     <div><span className="text-gray-400">status:</span> <span className={entry.status === 'error' ? 'text-red-500' : entry.status === 'success' ? 'text-emerald-600' : 'text-violet-500'}>{entry.status}</span></div>
                     {entry.durationMs !== undefined && <div><span className="text-gray-400">duration:</span> {entry.durationMs}ms</div>}
+                    {(entry.inputTokens !== undefined || entry.outputTokens !== undefined) && (
+                      <div><span className="text-gray-400">tokens:</span> {(entry.inputTokens ?? 0).toLocaleString('en-US')} in / {(entry.outputTokens ?? 0).toLocaleString('en-US')} out</div>
+                    )}
+                    {entry.estimatedCostUsd !== undefined && (
+                      <div><span className="text-gray-400">est. cost:</span> {formatUsd(entry.estimatedCostUsd)}</div>
+                    )}
                     {entry.error && <div className="text-red-500 break-all"><span className="text-gray-400">error:</span> {entry.error}</div>}
                     {entry.tokensConsumed !== undefined && (
                       <div>
@@ -115,6 +126,20 @@ export const LogPanel: React.FC<LogPanelProps> = ({ onClose }) => {
           );
         })}
       </div>
+
+      {/* Session total */}
+      {entries.length > 0 && (
+        <div className="shrink-0 border-t border-gray-100 bg-gray-50 px-4 py-2 flex items-center justify-between gap-2">
+          <span className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">Session total</span>
+          {summary.pricedCalls > 0 ? (
+            <span className="text-[11px] font-mono text-gray-700 truncate">
+              {summary.totalTokensIn.toLocaleString('en-US')} tok in · {summary.totalTokensOut.toLocaleString('en-US')} tok out · ≈{formatUsd(summary.totalCostUsd)}
+            </span>
+          ) : (
+            <span className="text-[11px] font-mono text-gray-400">no usage data</span>
+          )}
+        </div>
+      )}
     </div>
   );
 };

@@ -1,7 +1,7 @@
 import { Type, FileState } from "@google/genai";
 import { startLog, finishLog } from "./logger";
-import { generateContent, getAI } from "./geminiClient";
-import { MODELS } from "./models";
+import { generateContent, getAI, normalizeErrorMessage } from "./geminiClient";
+import { modelFor } from "./models";
 import { LruCache } from "../utils/lruCache";
 
 // -------------------------------------------------------------------
@@ -92,7 +92,7 @@ export async function generateAudioFromScript(
   script: string,
   voiceName = 'Aoede'
 ): Promise<{ url: string; duration: number; transcription: string }> {
-  const MODEL = MODELS.tts;
+  const MODEL = modelFor('tts');
   const log = startLog('TTS Generate', MODEL, `voice=${voiceName} | "${script.slice(0, 80)}${script.length > 80 ? '…' : ''}"`);
   try {
     const response = await generateContent({
@@ -112,7 +112,7 @@ export async function generateAudioFromScript(
     const duration = await getAudioDuration(url);
     return { url, duration, transcription: script };
   } catch (err) {
-    finishLog(log, err?.message ?? String(err));
+    finishLog(log, normalizeErrorMessage(err));
     throw err;
   }
 }
@@ -121,7 +121,7 @@ export async function generateNarrationFromVideos(
   videoClips: Array<{ name: string; analysis: string; duration: number }>,
   voiceName = 'Aoede'
 ): Promise<{ url: string; duration: number; transcription: string }> {
-  const MODEL = MODELS.flashLite;
+  const MODEL = modelFor('narration');
   const totalDuration = videoClips.reduce((s, c) => s + c.duration, 0);
   const log = startLog('Generate Narration Script', MODEL, `${videoClips.length} clips | total ${totalDuration.toFixed(1)}s`);
   try {
@@ -138,7 +138,7 @@ ${videoClips.map((c, i) => `Clip ${i + 1} (${c.duration.toFixed(1)}s) — "${c.n
     const script = scriptResponse.text?.trim() || 'No narration could be generated.';
     return generateAudioFromScript(script, voiceName);
   } catch (err) {
-    finishLog(log, err?.message ?? String(err));
+    finishLog(log, normalizeErrorMessage(err));
     throw err;
   }
 }
@@ -171,7 +171,7 @@ export async function analyzeVoiceover(
   audioFile: File
 ): Promise<{ transcription: string; segments: Array<{ text: string; start: number; end: number }> }> {
   // flash-lite: fast, cheap, current GA — same model as analyzeVideo
-  const MODEL = MODELS.flashLite;
+  const MODEL = modelFor('transcription');
   const log = startLog('Analyze Voiceover', MODEL, audioFile.name);
   try {
     // Upload + measure duration in parallel
@@ -198,13 +198,13 @@ export async function analyzeVoiceover(
     const segments = estimateSegments(transcription, totalDuration);
     return { transcription, segments };
   } catch (err) {
-    finishLog(log, err?.message ?? String(err));
+    finishLog(log, normalizeErrorMessage(err));
     throw err;
   }
 }
 
 export async function analyzeVideo(videoFile: File): Promise<string> {
-  const MODEL = MODELS.flashLite;
+  const MODEL = modelFor('videoAnalysis');
   const log = startLog('Analyze Video', MODEL, videoFile.name);
   try {
     const fileUri = await getFileUri(videoFile);
@@ -222,7 +222,7 @@ export async function analyzeVideo(videoFile: File): Promise<string> {
     const result = response.text || 'No analysis available.';
     return result;
   } catch (err) {
-    finishLog(log, err?.message ?? String(err));
+    finishLog(log, normalizeErrorMessage(err));
     throw err;
   }
 }
@@ -236,7 +236,7 @@ export async function suggestAlignment(
   voiceoverTranscription: string,
   videoClips: Array<{ id: string; name: string; analysis: string; duration?: number }>
 ): Promise<AlignmentEntry[]> {
-  const MODEL = MODELS.flashLite;
+  const MODEL = modelFor('clipAlignment');
   const log = startLog('Suggest Alignment', MODEL, `${videoClips.length} clips`);
   try {
     const prompt = `You are an expert video editor. Your task is to arrange video clips into the best playback order so the visuals naturally illustrate a voiceover narration.
@@ -297,7 +297,7 @@ Return a JSON array with one object per position, each containing:
     const entries: AlignmentEntry[] = JSON.parse(response.text || '[]');
     return entries;
   } catch (err) {
-    finishLog(log, err?.message ?? String(err));
+    finishLog(log, normalizeErrorMessage(err));
     throw err;
   }
 }
