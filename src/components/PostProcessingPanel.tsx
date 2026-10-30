@@ -21,6 +21,7 @@ import {
 } from 'lucide-react';
 import { VideoClip, Voiceover, CaptionStyle, CaptionMode, VideoDescription, ThumbnailCandidate } from '../types';
 import { generateDescription, identifyKeyMoments } from '../services/postProcessing';
+import { normalizeErrorMessage } from '../services/geminiClient';
 import { generateSRT, generateVTT, downloadTextFile } from '../utils/captionUtils';
 import { CAPTION_PRESETS, CAPTION_PRESET_ORDER, applyPreset } from '../utils/captionPresets';
 import { captureVideoFrame, addQuoteOverlay, downloadDataUrl, downloadFile, getClipAtTime } from '../utils/exportUtils';
@@ -118,7 +119,7 @@ function CopyButton({ text, className }: { text: string; className?: string }) {
 // ═══════════════════════════════════════════════════════════════════════════
 // TAB 1 — Description & Chapters
 // ═══════════════════════════════════════════════════════════════════════════
-function DescriptionTab({ voiceover, videoClips }: { voiceover: Voiceover; videoClips: VideoClip[] }) {
+export function DescriptionTab({ voiceover, videoClips }: { voiceover: Voiceover; videoClips: VideoClip[] }) {
   const [description, setDescription] = useState<VideoDescription | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
   const [error, setError] = useState('');
@@ -137,8 +138,10 @@ function DescriptionTab({ voiceover, videoClips }: { voiceover: Voiceover; video
         videoClips.map(c => c.analysis || '').filter(Boolean)
       );
       setDescription(result);
-    } catch {
-      setError('Failed to generate description. Please try again.');
+    } catch (err) {
+      // Surface the actual failure (missing key, API error, malformed model JSON)
+      // so the user sees the actionable reason instead of a generic retry line.
+      setError(normalizeErrorMessage(err));
     } finally {
       setIsGenerating(false);
     }
@@ -502,7 +505,7 @@ export function CaptionsTab({
 // ═══════════════════════════════════════════════════════════════════════════
 // TAB 3 — Thumbnails
 // ═══════════════════════════════════════════════════════════════════════════
-function ThumbnailsTab({ voiceover, videoClips }: { voiceover: Voiceover; videoClips: VideoClip[] }) {
+export function ThumbnailsTab({ voiceover, videoClips }: { voiceover: Voiceover; videoClips: VideoClip[] }) {
   const [thumbnails, setThumbnails] = useState<ThumbnailCandidate[]>([]);
   const [isGenerating, setIsGenerating] = useState(false);
   const [progress, setProgress] = useState('');
@@ -547,8 +550,9 @@ function ThumbnailsTab({ voiceover, videoClips }: { voiceover: Voiceover; videoC
       }
 
       if (results.length === 0) setError('Could not capture any frames. Try aligning clips first.');
-    } catch {
-      setError('Failed to identify key moments. Please try again.');
+    } catch (err) {
+      // Same surfacing rule as DescriptionTab: show the real reason.
+      setError(normalizeErrorMessage(err));
     } finally {
       setIsGenerating(false);
       setProgress('');

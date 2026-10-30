@@ -25,11 +25,7 @@ export interface Voiceover {
   trimStart?: number;       // seconds into the audio to begin playback (default 0)
   trimEnd?: number;         // seconds into the audio to stop playback (default = duration)
   transcription?: string;
-  segments?: Array<{
-    text: string;
-    start: number;
-    end: number;
-  }>;
+  segments?: CaptionSegment[];
   startTime?: number;
 }
 
@@ -53,6 +49,19 @@ export interface VideoDescription {
 export type CaptionMode = 'lower-third' | 'word-highlight' | 'speaker-labeled';
 
 export type CaptionPresetName = 'minimal' | 'bold-pop' | 'karaoke' | 'classic';
+
+export interface WordTiming {
+  word: string;
+  start: number; // seconds, absolute on the voiceover timeline
+  end: number;
+}
+
+export interface CaptionSegment {
+  text: string;
+  start: number;
+  end: number;
+  words?: WordTiming[]; // per-word timings when the transcriber provides them; absent → even-split fallback
+}
 
 export interface CaptionStyle {
   mode: CaptionMode;

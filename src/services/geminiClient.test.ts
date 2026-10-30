@@ -19,8 +19,8 @@ vi.mock('./apiKey', () => ({
   getApiKey: getApiKeyMock,
 }));
 
-import { getAI, generateContent, normalizeErrorMessage } from './geminiClient';
-import { startLog, subscribe, type LogEntry } from './logger';
+import { getAI, generateContent, normalizeErrorMessage, extractFailureCost } from './geminiClient';
+import { startLog, finishLog, subscribe, type LogEntry } from './logger';
 
 const RESPONSE = { text: 'ok', candidates: [] };
 
@@ -113,6 +113,130 @@ describe('generateContent wrapper', () => {
       generateContent({ model: 'gemini-test', contents: 'hello' }, log)
     ).rejects.toEqual({ code: 429, message: 'quota exceeded' });
     expect(log.error).toBe(JSON.stringify({ code: 429, message: 'quota exceeded' }));
+  });
+});
+
+describe('failed-call cost accounting', () => {
+  it('logs a failed call with 0 tokens / not billed when the error carries no usage', async () => {
+    generateContentMock.mockRejectedValue(new Error('boom'));
+    const log = startLog('Test Op', 'gemini-test', 'detail');
+
+    await expect(
+      generateContent({ model: 'gemini-test', contents: 'hello' }, log)
+    ).rejects.toThrow('boom');
+
+    expect(log.status).toBe('error');
+    expect(typeof log.durationMs).toBe('number');
+    expect(log.tokensConsumed).toBe(0);
+    expect(log.billed).toBe(false);
+  });
+
+  it('captures tokens and billed=true when the error carries usageMetadata', async () => {
+    const err = Object.assign(new Error('failed after processing'), {
+      usageMetadata: { promptTokenCount: 100, candidatesTokenCount: 37 },
+    });
+    generateContentMock.mockRejectedValue(err);
+    const log = startLog('Test Op', 'gemini-test', 'detail');
+
+    await expect(
+      generateContent({ model: 'gemini-test', contents: 'hello' }, log)
+    ).rejects.toThrow('failed after processing');
+
+    expect(log.status).toBe('error');
+    expect(log.tokensConsumed).toBe(137);
+    expect(log.billed).toBe(true);
+  });
+
+  it('reads usage nested under err.error (SDK ApiError shape)', async () => {
+    const err = Object.assign(new Error('API error'), {
+      error: { usageMetadata: { totalTokenCount: 512 } },
+    });
+    generateContentMock.mockRejectedValue(err);
+    const log = startLog('Test Op', 'gemini-test', 'detail');
+
+    await expect(
+      generateContent({ model: 'gemini-test', contents: 'hello' }, log)
+    ).rejects.toThrow();
+
+    expect(log.tokensConsumed).toBe(512);
+    expect(log.billed).toBe(true);
+  });
+
+  it('still logs cost state when the wrapper fails before any API call (missing key)', async () => {
+    getApiKeyMock.mockReturnValue('');
+    const log = startLog('Test Op', 'gemini-test', 'detail');
+
+    await expect(
+      generateContent({ model: 'gemini-test', contents: 'hello' }, log)
+    ).rejects.toThrow('No Gemini API key set');
+
+    expect(log.status).toBe('error');
+    expect(log.tokensConsumed).toBe(0);
+    expect(log.billed).toBe(false);
+  });
+
+  it('leaves cost fields unset on successful calls', async () => {
+    const log = startLog('Test Op', 'gemini-test', 'detail');
+    await generateContent({ model: 'gemini-test', contents: 'hello' }, log);
+
+    expect(log.status).toBe('success');
+    expect(log.tokensConsumed).toBeUndefined();
+    expect(log.billed).toBeUndefined();
+  });
+
+  it('keeps wrapper-captured cost state when a caller re-finishes the entry (gemini.ts outer catch)', async () => {
+    const err = Object.assign(new Error('late failure'), {
+      usageMetadata: { promptTokenCount: 20, candidatesTokenCount: 5 },
+    });
+    generateContentMock.mockRejectedValue(err);
+    const log = startLog('Test Op', 'gemini-test', 'detail');
+
+    try {
+      await generateContent({ model: 'gemini-test', contents: 'hello' }, log);
+    } catch {
+      finishLog(log, err.message); // the caller-side catch pattern in gemini.ts
+    }
+
+    expect(log.error).toBe('late failure');
+    expect(log.tokensConsumed).toBe(25);
+    expect(log.billed).toBe(true);
+  });
+});
+
+describe('extractFailureCost', () => {
+  it('reports 0 tokens / not billed when nothing about consumption is observable', () => {
+    expect(extractFailureCost(new Error('network down'))).toEqual({ tokensConsumed: 0, billed: false });
+    expect(extractFailureCost('plain string')).toEqual({ tokensConsumed: 0, billed: false });
+    expect(extractFailureCost({ code: 429, message: 'quota exceeded' })).toEqual({ tokensConsumed: 0, billed: false });
+    expect(extractFailureCost(undefined)).toEqual({ tokensConsumed: 0, billed: false });
+    expect(extractFailureCost(null)).toEqual({ tokensConsumed: 0, billed: false });
+  });
+
+  it('prefers totalTokenCount when present', () => {
+    expect(
+      extractFailureCost({ usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 5, totalTokenCount: 15 } })
+    ).toEqual({ tokensConsumed: 15, billed: true });
+  });
+
+  it('sums prompt + candidates when totalTokenCount is absent', () => {
+    expect(
+      extractFailureCost({ usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 5 } })
+    ).toEqual({ tokensConsumed: 15, billed: true });
+  });
+
+  it('reports not billed when usage is present but all token counts are 0', () => {
+    expect(
+      extractFailureCost({ usageMetadata: { promptTokenCount: 0, candidatesTokenCount: 0 } })
+    ).toEqual({ tokensConsumed: 0, billed: false });
+  });
+
+  it('ignores usage objects without numeric token fields', () => {
+    expect(extractFailureCost({ usageMetadata: { message: 'no counts here' } })).toEqual({ tokensConsumed: 0, billed: false });
+  });
+
+  it('reads usage from the response carrier', () => {
+    expect(extractFailureCost({ response: { usageMetadata: { totalTokenCount: 7 } } }))
+      .toEqual({ tokensConsumed: 7, billed: true });
   });
 });
 
