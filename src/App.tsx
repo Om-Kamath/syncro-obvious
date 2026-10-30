@@ -50,6 +50,8 @@ const PostProcessingPanel = React.lazy(() =>
   import('./components/PostProcessingPanel').then(m => ({ default: m.PostProcessingPanel })),
 );
 
+import { captionOverlayPositionClass } from './utils/captionPosition';
+
 function cn(...classes: (string | boolean | undefined | null)[]): string {
   return classes.filter(Boolean).join(' ');
 }
@@ -72,7 +74,7 @@ function attachFilmstrips(
   }
 }
 
-function CaptionOverlay({
+export function CaptionOverlay({
   segments,
   currentTime,
   style,
@@ -85,7 +87,7 @@ function CaptionOverlay({
   if (!seg) return null;
   const baseContainer = cn(
     'absolute left-0 right-0 px-6 pointer-events-none z-10 flex justify-center',
-    style.position === 'bottom' ? 'bottom-6' : 'top-6'
+    captionOverlayPositionClass(style.position)
   );
   if (style.mode === 'word-highlight') {
     const words = resolveWordTimings(seg);
