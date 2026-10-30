@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import WaveSurfer from 'wavesurfer.js';
 import { VideoClip, Voiceover, TransitionType } from '../types';
+import { ClipWaveform } from './ClipWaveform';
 import { Play, Pause, Scissors, Wand2, Video, Plus, Minus, Maximize2, Zap, Layers, Star, Trash2 } from 'lucide-react';
 import { DEFAULT_PPS, fitPixelsPerSecond, stepPixelsPerSecond } from '../utils/timelineZoom';
 import { clsx, type ClassValue } from 'clsx';
@@ -500,6 +501,20 @@ export const Timeline: React.FC<TimelineProps> = ({
                               )}
                               style={{ left: `${clip.startTime * pixelsPerSecond}px`, width: `${effectiveDuration * pixelsPerSecond}px`, zIndex: isDragging ? 100 : 2 }}
                             >
+                              {/* Audio waveform underlay — silent/undecodable media renders nothing.
+                                  Sized to the full source duration and shifted by trimStart so the
+                                  visible slice matches what the clip plays. Negative z keeps it
+                                  above the block background but below labels; the block always sets
+                                  a zIndex, so it forms a stacking context. */}
+                              <div aria-hidden="true" className="absolute inset-0 -z-10 overflow-hidden rounded-xl pointer-events-none opacity-50">
+                                <div
+                                  className="absolute top-0 bottom-0"
+                                  style={{ width: `${clip.duration * pixelsPerSecond}px`, left: `-${(clip.trimStart ?? 0) * pixelsPerSecond}px` }}
+                                >
+                                  <ClipWaveform url={clip.url} height={TRACK_H} />
+                                </div>
+                              </div>
+
                               {/* Left trim */}
                               <div
                                 data-trim-handle="left"
