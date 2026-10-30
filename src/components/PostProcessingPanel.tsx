@@ -57,6 +57,12 @@ import {
   GIF_WIDTH_OPTIONS,
   MAX_GIF_FRAMES,
 } from '../utils/gifExport';
+import {
+  DEFAULT_TARGET_DBFS,
+  amplitudeToDbfs,
+  computeNormalizationGain,
+  scanPeak,
+} from '../utils/audioNormalization';
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -946,6 +952,7 @@ function ExportTab({
   const [qualityId, setQualityId] = useState<QualityPresetId>(DEFAULT_QUALITY_PRESET);
   const quality = QUALITY_PRESETS[qualityId];
   const stopRef = useRef<(() => void) | null>(null);
+  const [normalizeAudio, setNormalizeAudio] = useState(true);
 
   const [gifFps, setGifFps] = useState(10);
   const [gifWidth, setGifWidth] = useState(360);
@@ -1035,8 +1042,33 @@ function ExportTab({
       const dest = audioCtx.createMediaStreamDestination();
       const source = audioCtx.createBufferSource();
       source.buffer = mixedBuffer;
-      source.connect(dest);
-      source.connect(audioCtx.destination);
+
+      // Peak normalization: scan the mixed buffer (the exact recorded window —
+      // narration + music) and scale its loudest sample to the −1.0 dBFS
+      // ceiling via a gain node.
+      let audioOut: AudioNode = source;
+      if (normalizeAudio) {
+        try {
+          const channels = audioChannelsOf(mixedBuffer).channels;
+          const gain = computeNormalizationGain(channels, DEFAULT_TARGET_DBFS);
+          const peakDbfs = amplitudeToDbfs(scanPeak(channels));
+          if (gain !== 1) {
+            const gainNode = audioCtx.createGain();
+            gainNode.gain.value = gain;
+            source.connect(gainNode);
+            audioOut = gainNode;
+          }
+          console.info(
+            `Audio normalization: peak ${peakDbfs === null ? 'silent' : `${peakDbfs.toFixed(2)} dBFS`}` +
+              ` → ${DEFAULT_TARGET_DBFS} dBFS (gain ×${gain.toFixed(3)})`,
+          );
+        } catch (e) {
+          // Best effort: an unreadable mix exports unnormalized rather than failing the export.
+          console.warn('Audio normalization scan failed — exporting unnormalized:', e);
+        }
+      }
+      audioOut.connect(dest);
+      audioOut.connect(audioCtx.destination);
 
       // Build combined stream
       const canvasStream = canvas.captureStream(30);
@@ -1346,6 +1378,19 @@ function ExportTab({
                 </p>
               )}
             </div>
+            <label className="flex items-center gap-2 cursor-pointer select-none w-fit">
+              <input
+                type="checkbox"
+                checked={normalizeAudio}
+                onChange={e => setNormalizeAudio(e.target.checked)}
+                disabled={isExporting}
+                className="w-4 h-4 rounded border-gray-300 accent-violet-600 disabled:opacity-50"
+              />
+              <span className="text-xs font-semibold text-gray-900">Normalize audio</span>
+              <span className="text-[10px] text-gray-400">
+                scans the recording window and scales its loudest point to −1.0 dBFS
+              </span>
+            </label>
 
             <div className="space-y-2">
               <p className="text-xs font-semibold text-gray-900">Quality</p>
