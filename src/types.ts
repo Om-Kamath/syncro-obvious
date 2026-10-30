@@ -1,3 +1,5 @@
+import type { CaptionPosition } from './utils/captionPosition';
+
 export type WorkflowMode = 'upload-both' | 'script-video' | 'video-only';
 
 export type TransitionType = 'cut' | 'fade' | 'dissolve' | 'wipe';
@@ -67,7 +69,7 @@ export interface CaptionStyle {
   fontSize: number;
   color: string;
   bgColor: string;
-  position: 'bottom' | 'top';
+  position: CaptionPosition;
 }
 
 export interface CaptionTemplate {

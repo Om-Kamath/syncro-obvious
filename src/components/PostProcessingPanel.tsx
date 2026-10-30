@@ -43,6 +43,7 @@ import {
   formatEstimatedSize,
   type QualityPresetId,
 } from '../utils/qualityPresets';
+import { captionBoxY, type CaptionPosition } from '../utils/captionPosition';
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -333,7 +334,7 @@ function CaptionsTab({
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const handleMode = (mode: CaptionMode) => onStyleChange({ ...captionStyle, mode });
-  const handlePosition = (position: 'bottom' | 'top') => onStyleChange({ ...captionStyle, position });
+  const handlePosition = (position: CaptionPosition) => onStyleChange({ ...captionStyle, position });
 
   // Templates load once, at initialization — no effect, no setState-in-effect.
   const [initialLoad] = useState(loadTemplatesResult);
@@ -511,7 +512,7 @@ function CaptionsTab({
       <div className="space-y-2">
         <p className="text-xs font-bold uppercase tracking-widest text-violet-500">Position</p>
         <div className="flex gap-3">
-          {(['bottom', 'top'] as const).map(pos => (
+          {(['top', 'center', 'bottom'] as const).map(pos => (
             <button
               key={pos}
               onClick={() => handlePosition(pos)}
@@ -1339,7 +1340,7 @@ function drawCaptionOnCanvas(
   const maxLineWidth = lines.reduce((m, l) => Math.max(m, ctx.measureText(l).width), 0);
   const boxW = Math.min(maxLineWidth + padX * 2, W - 40);
   const boxX = (W - boxW) / 2;
-  const boxY = style.position === 'bottom' ? H - boxH - 32 : 32;
+  const boxY = captionBoxY(style.position, H, boxH);
 
   ctx.fillStyle = style.bgColor;
   ctx.beginPath();
