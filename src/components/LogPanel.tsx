@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { subscribe, LogEntry } from '../services/logger';
 import { X, Activity, CheckCircle, XCircle, Loader2, ChevronDown, ChevronRight } from 'lucide-react';
+import { UsageDashboard } from './UsageDashboard';
 
 interface LogPanelProps {
   onClose: () => void;
@@ -14,6 +15,7 @@ function timeStr(d: Date) {
 export const LogPanel: React.FC<LogPanelProps> = ({ onClose }) => {
   const [entries, setEntries] = useState<LogEntry[]>([]);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [tab, setTab] = useState<'calls' | 'usage'>('calls');
 
   useEffect(() => subscribe(setEntries), []);
 
@@ -39,7 +41,29 @@ export const LogPanel: React.FC<LogPanelProps> = ({ onClose }) => {
         </div>
       </div>
 
-      {/* Entries */}
+      {/* Tabs */}
+      <div className="flex gap-1 px-3 py-2 border-b border-gray-100 shrink-0">
+        <button
+          onClick={() => setTab('calls')}
+          aria-pressed={tab === 'calls'}
+          className={`px-2.5 py-1 rounded-full text-[11px] font-semibold transition-colors ${
+            tab === 'calls' ? 'bg-violet-100 text-violet-700' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'
+          }`}
+        >
+          Calls
+        </button>
+        <button
+          onClick={() => setTab('usage')}
+          aria-pressed={tab === 'usage'}
+          className={`px-2.5 py-1 rounded-full text-[11px] font-semibold transition-colors ${
+            tab === 'usage' ? 'bg-violet-100 text-violet-700' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'
+          }`}
+        >
+          Usage
+        </button>
+      </div>
+
+      {/* Entries / Usage */}
       <div className="flex-1 overflow-y-auto">
         {entries.length === 0 && (
           <div className="flex flex-col items-center justify-center h-full gap-3 text-gray-400">
@@ -47,7 +71,8 @@ export const LogPanel: React.FC<LogPanelProps> = ({ onClose }) => {
             <p className="text-xs">No API calls yet</p>
           </div>
         )}
-        {entries.map(entry => {
+        {entries.length > 0 && tab === 'usage' && <UsageDashboard entries={entries} />}
+        {entries.length > 0 && tab === 'calls' && entries.map(entry => {
           const isOpen = expanded.has(entry.id);
           return (
             <div key={entry.id} className="border-b border-gray-50 last:border-0">
