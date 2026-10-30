@@ -21,6 +21,7 @@ import {
   type AlignmentEntry,
 } from './services/gemini';
 import {
+  Film,
   Video,
   Music,
   Trash2,
@@ -719,7 +720,16 @@ export default function App() {
               <span className="text-[10px] font-bold bg-violet-100 text-violet-600 px-2 py-0.5 rounded-full">{videoClips.length}</span>
             </div>
             <div className="p-4 space-y-3">
-              <FileUploader label="Add Videos" accept={{ 'video/*': ['.mp4', '.mov', '.webm'] }} onFilesAdded={handleVideoUpload} onRejected={rejectNonVideos} icon={<Video className="w-5 h-5" />} />
+              {videoClips.length === 0 && (
+                <div className="flex flex-col items-center gap-1.5 py-6 px-4 text-center bg-gray-50 border border-gray-100 rounded-2xl">
+                  <div className="w-12 h-12 bg-violet-100 rounded-2xl flex items-center justify-center">
+                    <Film className="w-6 h-6 text-violet-500" />
+                  </div>
+                  <p className="text-sm font-semibold text-gray-700">Your media library is empty</p>
+                  <p className="text-xs text-gray-400">Import videos below — they show up here and on your timeline.</p>
+                </div>
+              )}
+              <FileUploader label="Import Media" accept={{ 'video/*': ['.mp4', '.mov', '.webm'] }} onFilesAdded={handleVideoUpload} onRejected={rejectNonVideos} icon={<Video className="w-5 h-5" />} />
               <AnimatePresence mode="popLayout">
                 {videoClips.map((clip) => (
                   <motion.div key={clip.id} layout initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95 }}
