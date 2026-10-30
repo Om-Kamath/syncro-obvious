@@ -6,6 +6,7 @@ import { Play, Pause, Scissors, Wand2, Video, Plus, Minus, Maximize2, Zap, Layer
 import { DEFAULT_PPS, fitPixelsPerSecond, stepPixelsPerSecond } from '../utils/timelineZoom';
 import { findClipAtPlayhead, splitClipsAtPlayhead } from '../utils/clipSplit';
 import { selectionReducer, initialSelection, clipIdsInRect, type SelectionAction } from '../utils/selectionReducer';
+import { collectSnapCandidates, findSnap } from '../utils/timelineSnap';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 
@@ -177,6 +178,12 @@ export const Timeline: React.FC<TimelineProps> = ({
 
   const getTimeFromX = useCallback((x: number) => x / pixelsPerSecond, []);
 
+  // Snap targets for drag/trim gestures: the origin, the playhead, and every
+  // other clip's boundaries (excluding the clip being manipulated so an edge
+  // never snaps to itself). Reads via refs so drag effects stay live.
+  const snapTargets = (excludeId?: string) =>
+    collectSnapCandidates(videoClipsRef.current, currentTimeRef.current, excludeId);
+
   useEffect(() => {
     if (waveformRef.current && voiceover) {
       wavesurfer.current = WaveSurfer.create({
@@ -265,6 +272,12 @@ export const Timeline: React.FC<TimelineProps> = ({
       const drag = clipDragRef.current;
       if (!drag) return;
       const deltaTime = (e.clientX - drag.startMouseX) / pixelsPerSecond;
+      // Snap the dragged clip's leading edge to a nearby boundary (origin,
+      // playhead, or a neighboring clip edge) by correcting the group delta;
+      // group members keep their offsets, matching multi-select semantics.
+      const rawStart = drag.startClipTime + deltaTime;
+      const snapAdjust = findSnap(rawStart, snapTargets(drag.id), pixelsPerSecond).time - rawStart;
+      const groupDeltaTime = deltaTime + snapAdjust;
       let trackDelta = 0;
       if (videoTracksContainerRef.current) {
         const rect = videoTracksContainerRef.current.getBoundingClientRect();
@@ -279,7 +292,7 @@ export const Timeline: React.FC<TimelineProps> = ({
       onVideoClipChange(videoClipsRef.current.map(c => {
         const start = group.get(c.id);
         if (!start) return c;
-        return { ...c, startTime: Math.max(0, start.startTime + deltaTime), track: Math.max(0, start.track + trackDelta) };
+        return { ...c, startTime: Math.max(0, start.startTime + groupDeltaTime), track: Math.max(0, start.track + trackDelta) };
       }));
     };
     const onUp = () => { clipDragRef.current = null; setDraggingClipId(null); onVideoClipChange(resolveOverlaps(videoClipsRef.current)); };
@@ -344,9 +357,13 @@ export const Timeline: React.FC<TimelineProps> = ({
       onVideoClipChange(videoClipsRef.current.map((c: VideoClip) => {
         if (c.id !== drag.id) return c;
         if (drag.side === 'right') {
-          return { ...c, trimmedDuration: Math.max(0.5, Math.min(drag.origTrimmedDuration + deltaSec, drag.origDuration - drag.origTrimStart)) };
+          const rawEnd = drag.origStartTime + drag.origTrimmedDuration + deltaSec;
+          const snappedEnd = findSnap(rawEnd, snapTargets(drag.id), pixelsPerSecond).time;
+          return { ...c, trimmedDuration: Math.max(0.5, Math.min(snappedEnd - drag.origStartTime, drag.origDuration - drag.origTrimStart)) };
         } else {
-          const clamped = Math.max(0, Math.min(deltaSec, drag.origTrimmedDuration - 0.5));
+          const rawStart = drag.origStartTime + deltaSec;
+          const snappedStart = findSnap(rawStart, snapTargets(drag.id), pixelsPerSecond).time;
+          const clamped = Math.max(0, Math.min(snappedStart - drag.origStartTime, drag.origTrimmedDuration - 0.5));
           return { ...c, trimStart: drag.origTrimStart + clamped > 0 ? drag.origTrimStart + clamped : undefined, startTime: Math.max(0, drag.origStartTime + clamped), trimmedDuration: drag.origTrimmedDuration - clamped };
         }
       }));
