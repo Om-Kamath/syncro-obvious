@@ -1,12 +1,6 @@
-import { GoogleGenAI, Type } from "@google/genai";
-import { getApiKey } from "./apiKey";
+import { Type } from "@google/genai";
+import { generateContent } from "./geminiClient";
 import { MODELS } from "./models";
-
-function getAI() {
-  const apiKey = getApiKey();
-  if (!apiKey) throw new Error('No Gemini API key set. Click the key icon in the header to add one.');
-  return new GoogleGenAI({ apiKey });
-}
 
 /**
  * Parses the model's JSON response, raising on empty or malformed output
@@ -42,7 +36,7 @@ Generate:
 2. Chapter timestamps (3-8 chapters) derived from topic shifts in the transcript. Each chapter needs a timestamp (in seconds from the start) and a short descriptive label (2-5 words)
 3. 8-12 relevant hashtags for YouTube/social media (without the # symbol)`;
 
-  const response = await getAI().models.generateContent({
+  const response = await generateContent({
     model: MODELS.flash,
     contents: prompt,
     config: {
@@ -96,7 +90,7 @@ For each moment provide:
 - A short punchy quote or label (max 7 words) suitable as thumbnail text
 - Why this moment is visually and emotionally compelling for a thumbnail`;
 
-  const response = await getAI().models.generateContent({
+  const response = await generateContent({
     model: MODELS.flash,
     contents: prompt,
     config: {
