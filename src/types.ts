@@ -50,6 +50,13 @@ export interface VideoDescription {
   hashtags: string[];
 }
 
+export type TitleAngle = 'how-to' | 'listicle' | 'question' | 'bold-claim' | 'curiosity';
+
+export interface TitleVariant {
+  angle: TitleAngle;
+  title: string;
+}
+
 export type CaptionMode = 'lower-third' | 'word-highlight' | 'speaker-labeled';
 
 export interface CaptionStyle {
