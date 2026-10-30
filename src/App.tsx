@@ -440,11 +440,12 @@ export default function App() {
     }
   };
 
-  const removeVideo = (id: string) => {
-    const clip = videoClips.find(c => c.id === id);
-    if (clip) URL.revokeObjectURL(clip.url);
-    setVideoClips(videoClips.filter(c => c.id !== id));
+  const removeVideos = (ids: string[]) => {
+    const idSet = new Set(ids);
+    videoClips.forEach(c => { if (idSet.has(c.id)) URL.revokeObjectURL(c.url); });
+    setVideoClips(videoClips.filter(c => !idSet.has(c.id)));
   };
+  const removeVideo = (id: string) => removeVideos([id]);
 
   // Revoke the previous voiceover's blob URL whenever it is replaced or
   // removed — otherwise each upload or TTS run leaks the old audio blob.
@@ -748,6 +749,7 @@ export default function App() {
             onAutoAlign={handleAutoAlign}
             onSwapClip={handleSwapClip}
             onDeleteClip={removeVideo}
+            onDeleteClips={removeVideos}
             isAligning={isAligning}
             currentTime={currentTime}
             onTimeUpdate={setCurrentTime}
