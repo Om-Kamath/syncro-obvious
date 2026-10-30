@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState, useCallback, useReducer } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState, useCallback, useReducer } from 'react';
 import WaveSurfer from 'wavesurfer.js';
 import { VideoClip, Voiceover, TransitionType } from '../types';
 import { ClipWaveform } from './ClipWaveform';
@@ -9,6 +9,7 @@ import { selectionReducer, initialSelection, clipIdsInRect, type SelectionAction
 import { collectSnapCandidates, findSnap } from '../utils/timelineSnap';
 import { estimateAlignmentFlowCost } from '../services/costEstimate';
 import { CostEstimateBadge } from './CostEstimateBadge';
+import { viewportOverflowShift } from '../utils/viewportShift';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 
@@ -393,6 +394,24 @@ export const Timeline: React.FC<TimelineProps> = ({
     window.addEventListener('mouseup', onUp);
     return () => { window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); };
   }, [draggingTrimId]);
+
+  // Fixed popovers escape the scroll container but can still overflow the
+  // viewport when their anchor sits near a window edge. Measure whichever
+  // panel just mounted and slide it back inside (only one is ever open).
+  const popoverRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const el = popoverRef.current;
+    if (!el || (!transitionPopoverId && !altPopover)) return;
+    const r = el.getBoundingClientRect();
+    const { dx, dy } = viewportOverflowShift(
+      { left: r.left, top: r.top, right: r.right, bottom: r.bottom },
+      { width: window.innerWidth, height: window.innerHeight },
+    );
+    if (dx || dy) {
+      if (transitionPopoverId) setTransitionPopoverPos(p => (p ? { x: p.x + dx, y: p.y + dy } : p));
+      if (altPopover) setAltPopover(p => (p ? { ...p, x: p.x + dx, y: p.y + dy } : p));
+    }
+  }, [transitionPopoverId, altPopover]);
 
   const togglePlay = () => setIsPlaying(p => !p);
 
@@ -932,6 +951,7 @@ export const Timeline: React.FC<TimelineProps> = ({
         if (!targetClip) return null;
         return (
           <div
+            ref={popoverRef}
             className="fixed z-50 bg-white border border-gray-200 rounded-xl shadow-xl p-1.5 w-36"
             style={{ left: transitionPopoverPos.x, top: transitionPopoverPos.y }}
             onClick={e => e.stopPropagation()}
@@ -958,6 +978,7 @@ export const Timeline: React.FC<TimelineProps> = ({
         if (!clip?.alternatives || clip.alternatives.length === 0) return null;
         return (
           <div
+            ref={popoverRef}
             className="fixed z-50 bg-white border border-gray-200 rounded-xl shadow-xl p-2 w-56"
             style={{ left: altPopover.x, top: altPopover.y, maxWidth: 'calc(100vw - 16px)' }}
             onClick={e => e.stopPropagation()}
