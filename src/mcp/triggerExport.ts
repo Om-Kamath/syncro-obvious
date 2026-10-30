@@ -109,7 +109,9 @@ export function parseTriggerExportArgs(input: unknown): ParsedTriggerExportArgs 
 /** Tool handler: validate, enqueue, report the job id. */
 export function handleTriggerExport(store: ExportJobStore, input: unknown): TriggerExportResult {
   const parsed = parseTriggerExportArgs(input);
-  if (!parsed.ok) return parsed;
+  // Literal-equality narrowing: the project compiles without `strict`, and non-strict
+  // tsc does not narrow discriminated unions through `!parsed.ok` in this branch.
+  if (parsed.ok === false) return parsed;
   const job = store.enqueue(parsed.args);
   return { ok: true, jobId: job.id, status: 'queued' };
 }
