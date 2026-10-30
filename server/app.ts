@@ -2,6 +2,7 @@ import { join } from 'node:path';
 import express, { type Express, type NextFunction, type Request, type Response } from 'express';
 import { createMediaRouter } from './media/media.router';
 import { MediaStore } from './media/media.store';
+import { packageVersion } from './version';
 
 const DEFAULT_MAX_UPLOAD_BYTES = 512 * 1024 * 1024;
 const DEFAULT_MEDIA_ROOT = join(process.cwd(), 'data', 'media');
@@ -35,6 +36,11 @@ export function createApp(options: AppOptions = {}): Express {
 
   app.get('/healthz', (_req, res) => {
     res.json({ ok: true });
+  });
+
+  // Version comes from package.json so a release tag and the API agree.
+  app.get('/version', (_req, res) => {
+    res.json({ name: 'syncro', version: packageVersion() });
   });
 
   // Same payload under the /api prefix that the media routes already share.
