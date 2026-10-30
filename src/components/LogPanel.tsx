@@ -70,6 +70,11 @@ export const LogPanel: React.FC<LogPanelProps> = ({ onClose }) => {
                         {entry.durationMs < 1000 ? `${entry.durationMs}ms` : `${(entry.durationMs / 1000).toFixed(1)}s`}
                       </span>
                     )}
+                    {entry.status === 'error' && entry.billed !== undefined && (
+                      <span className={`text-[10px] font-mono shrink-0 ${entry.billed ? 'text-amber-500' : 'text-gray-300'}`}>
+                        {entry.billed ? `${entry.tokensConsumed} tok · billed` : 'not billed'}
+                      </span>
+                    )}
                     {entry.status === 'pending' && <span className="text-[10px] text-violet-400 shrink-0 font-mono">…</span>}
                   </div>
                   <div className="flex items-center gap-1.5 mt-0.5">
@@ -93,6 +98,16 @@ export const LogPanel: React.FC<LogPanelProps> = ({ onClose }) => {
                     <div><span className="text-gray-400">status:</span> <span className={entry.status === 'error' ? 'text-red-500' : entry.status === 'success' ? 'text-emerald-600' : 'text-violet-500'}>{entry.status}</span></div>
                     {entry.durationMs !== undefined && <div><span className="text-gray-400">duration:</span> {entry.durationMs}ms</div>}
                     {entry.error && <div className="text-red-500 break-all"><span className="text-gray-400">error:</span> {entry.error}</div>}
+                    {entry.tokensConsumed !== undefined && (
+                      <div>
+                        <span className="text-gray-400">cost:</span> {entry.tokensConsumed} token{entry.tokensConsumed === 1 ? '' : 's'} consumed
+                        {entry.billed !== undefined && (
+                          <span className={entry.billed ? 'text-amber-600' : 'text-emerald-600'}>
+                            {entry.billed ? ' · billed' : ' · not billed'}
+                          </span>
+                        )}
+                      </div>
+                    )}
                   </div>
                 </div>
               )}
