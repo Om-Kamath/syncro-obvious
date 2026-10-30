@@ -8,7 +8,6 @@ import {
   Image,
   Download,
   Wand2,
-  Copy,
   Check,
   Loader2,
   Lock,
@@ -18,6 +17,7 @@ import {
   ChevronUp,
   Hash,
   Film,
+  ListChecks,
 } from 'lucide-react';
 import { VideoClip, Voiceover, CaptionStyle, CaptionMode, VideoDescription, ThumbnailCandidate } from '../types';
 import { generateDescription, identifyKeyMoments } from '../services/postProcessing';
@@ -25,6 +25,8 @@ import { generateSRT, generateVTT, downloadTextFile } from '../utils/captionUtil
 import { captureVideoFrame, addQuoteOverlay, downloadDataUrl, downloadFile, getClipAtTime } from '../utils/exportUtils';
 import { EXPORT_PRESETS, DEFAULT_EXPORT_PRESET, computeDrawGeometry, type ExportPresetId } from '../utils/exportPresets';
 import { PLATFORM_PRESETS, DEFAULT_PLATFORM_PRESET, supportsChapters, type PlatformId } from '../utils/platformPresets';
+import { PublishChecklistTab } from './PublishChecklistTab';
+import { CopyButton } from './CopyButton';
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -83,44 +85,21 @@ function LockedState({ message }: { message: string }) {
   );
 }
 
-// ── Copy button ──────────────────────────────────────────────────────────────
-function CopyButton({ text, className }: { text: string; className?: string }) {
-  const [copied, setCopied] = useState(false);
-  const [failed, setFailed] = useState(false);
-  const copy = () => {
-    navigator.clipboard.writeText(text).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    }).catch(() => {
-      setFailed(true);
-      setTimeout(() => setFailed(false), 2000);
-    });
-  };
-  return (
-    <button
-      onClick={copy}
-      className={cn(
-        'flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg transition-all',
-        copied
-          ? 'bg-violet-50 text-violet-600'
-          : failed
-          ? 'bg-red-50 text-red-500'
-          : 'bg-gray-100 text-gray-500 hover:bg-gray-200',
-        className
-      )}
-    >
-      {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-      {copied ? 'Copied!' : failed ? 'Failed' : 'Copy'}
-    </button>
-  );
-}
-
 // ═══════════════════════════════════════════════════════════════════════════
 // TAB 1 — Description & Chapters
 // ═══════════════════════════════════════════════════════════════════════════
-function DescriptionTab({ voiceover, videoClips }: { voiceover: Voiceover; videoClips: VideoClip[] }) {
+function DescriptionTab({
+  voiceover,
+  videoClips,
+  description,
+  onDescriptionChange,
+}: {
+  voiceover: Voiceover;
+  videoClips: VideoClip[];
+  description: VideoDescription | null;
+  onDescriptionChange: (d: VideoDescription | null) => void;
+}) {
   const [platform, setPlatform] = useState<PlatformId>(DEFAULT_PLATFORM_PRESET);
-  const [description, setDescription] = useState<VideoDescription | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
   const [error, setError] = useState('');
   const [showHashtags, setShowHashtags] = useState(false);
@@ -134,7 +113,7 @@ function DescriptionTab({ voiceover, videoClips }: { voiceover: Voiceover; video
   const handlePlatform = (id: PlatformId) => {
     if (id === platform) return;
     setPlatform(id);
-    setDescription(null);
+    onDescriptionChange(null);
     setError('');
   };
 
@@ -149,7 +128,7 @@ function DescriptionTab({ voiceover, videoClips }: { voiceover: Voiceover; video
         videoClips.map(c => c.analysis || '').filter(Boolean),
         platform
       );
-      setDescription(result);
+      onDescriptionChange(result);
     } catch {
       setError('Failed to generate description. Please try again.');
     } finally {
@@ -508,8 +487,17 @@ function CaptionsTab({
 // ═══════════════════════════════════════════════════════════════════════════
 // TAB 3 — Thumbnails
 // ═══════════════════════════════════════════════════════════════════════════
-function ThumbnailsTab({ voiceover, videoClips }: { voiceover: Voiceover; videoClips: VideoClip[] }) {
-  const [thumbnails, setThumbnails] = useState<ThumbnailCandidate[]>([]);
+function ThumbnailsTab({
+  voiceover,
+  videoClips,
+  thumbnails,
+  onThumbnailsChange,
+}: {
+  voiceover: Voiceover;
+  videoClips: VideoClip[];
+  thumbnails: ThumbnailCandidate[];
+  onThumbnailsChange: (t: ThumbnailCandidate[]) => void;
+}) {
   const [isGenerating, setIsGenerating] = useState(false);
   const [progress, setProgress] = useState('');
   const [error, setError] = useState('');
@@ -522,7 +510,7 @@ function ThumbnailsTab({ voiceover, videoClips }: { voiceover: Voiceover; videoC
     setIsGenerating(true);
     setError('');
     setProgress('Asking AI to identify key moments…');
-    setThumbnails([]);
+    onThumbnailsChange([]);
     try {
       const moments = await identifyKeyMoments(
         voiceover.transcription,
@@ -546,7 +534,7 @@ function ThumbnailsTab({ voiceover, videoClips }: { voiceover: Voiceover; videoC
             reason: m.reason,
             imageDataUrl: withText,
           });
-          setThumbnails([...results]);
+          onThumbnailsChange([...results]);
         } catch {
           // skip this frame
         }
@@ -1062,7 +1050,7 @@ function drawCaptionOnCanvas(
 // ═══════════════════════════════════════════════════════════════════════════
 // MAIN PANEL
 // ═══════════════════════════════════════════════════════════════════════════
-type Tab = 'description' | 'captions' | 'thumbnails' | 'export';
+type Tab = 'description' | 'captions' | 'thumbnails' | 'export' | 'publish';
 
 interface PostProcessingPanelProps {
   voiceover: Voiceover | null;
@@ -1083,6 +1071,10 @@ export function PostProcessingPanel({
   onCaptionsEnabledChange,
 }: PostProcessingPanelProps) {
   const [activeTab, setActiveTab] = useState<Tab>('description');
+  // Lifted so the Publish checklist can consolidate generated assets — and so
+  // they survive switching tabs (hidden tabs unmount their state otherwise).
+  const [description, setDescription] = useState<VideoDescription | null>(null);
+  const [thumbnails, setThumbnails] = useState<ThumbnailCandidate[]>([]);
 
   const hasTranscription = !!voiceover?.transcription && !!voiceover?.segments?.length;
   const hasClips = videoClips.length > 0;
@@ -1097,6 +1089,7 @@ export function PostProcessingPanel({
     { id: 'captions', label: 'Captions', icon: MessageSquare, locked: !hasTranscription },
     { id: 'thumbnails', label: 'Thumbnails', icon: Image, locked: !hasTranscription || !hasClips },
     { id: 'export', label: 'Export', icon: Download, locked: false },
+    { id: 'publish', label: 'Publish', icon: ListChecks, locked: false },
   ];
 
   return (
@@ -1156,7 +1149,12 @@ export function PostProcessingPanel({
         >
           {activeTab === 'description' && (
             voiceover
-              ? <DescriptionTab voiceover={voiceover} videoClips={videoClips} />
+              ? <DescriptionTab
+                  voiceover={voiceover}
+                  videoClips={videoClips}
+                  description={description}
+                  onDescriptionChange={setDescription}
+                />
               : <LockedState message="Upload a voiceover and run AI Auto-Align to generate descriptions." />
           )}
           {activeTab === 'captions' && (
@@ -1170,7 +1168,12 @@ export function PostProcessingPanel({
           )}
           {activeTab === 'thumbnails' && (
             voiceover
-              ? <ThumbnailsTab voiceover={voiceover} videoClips={videoClips} />
+              ? <ThumbnailsTab
+                  voiceover={voiceover}
+                  videoClips={videoClips}
+                  thumbnails={thumbnails}
+                  onThumbnailsChange={setThumbnails}
+                />
               : <LockedState message="Upload a voiceover and run AI Auto-Align to generate thumbnails." />
           )}
           {activeTab === 'export' && (
@@ -1179,6 +1182,13 @@ export function PostProcessingPanel({
               videoClips={videoClips}
               captionStyle={captionStyle}
               captionsEnabled={captionsEnabled}
+            />
+          )}
+          {activeTab === 'publish' && (
+            <PublishChecklistTab
+              voiceover={voiceover}
+              description={description}
+              thumbnails={thumbnails}
             />
           )}
         </motion.div>
