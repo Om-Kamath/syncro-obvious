@@ -13,6 +13,7 @@ import { VoiceoverEditor } from './components/VoiceoverEditor';
 import { LogPanel } from './components/LogPanel';
 import { ToastContainer } from './components/ToastContainer';
 import { toast } from './services/toastStore';
+import { invalidateWaveformPeaks, voiceoverAssetId } from './services/waveformPeaks';
 import {
   analyzeVoiceover,
   analyzeVideo,
@@ -539,6 +540,15 @@ export default function App() {
     setVoiceover(prev => {
       if (prev && prev.url !== next?.url && prev.url.startsWith('blob:')) {
         URL.revokeObjectURL(prev.url);
+      }
+      // Peaks-cache lifecycle: a replaced voiceover's cached peaks are always
+      // stale — either the same asset was re-imported (same derived id, must
+      // not serve stale data) or the asset is gone entirely. Invalidation is
+      // idempotent, so StrictMode's double-invoked updater stays safe. The
+      // same-audio paths (e.g. attaching a mediaId on project save) keep
+      // their cached peaks — only an actual asset change invalidates.
+      if (prev && prev.url !== next?.url) {
+        invalidateWaveformPeaks(voiceoverAssetId(prev));
       }
       return next;
     });
