@@ -1,5 +1,6 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { getApiKey } from "./apiKey";
+import { MODELS } from "./models";
 
 function getAI() {
   const apiKey = getApiKey();
@@ -42,7 +43,7 @@ Generate:
 3. 8-12 relevant hashtags for YouTube/social media (without the # symbol)`;
 
   const response = await getAI().models.generateContent({
-    model: "gemini-3-flash-preview",
+    model: MODELS.flash,
     contents: prompt,
     config: {
       responseMimeType: "application/json",
@@ -96,7 +97,7 @@ For each moment provide:
 - Why this moment is visually and emotionally compelling for a thumbnail`;
 
   const response = await getAI().models.generateContent({
-    model: "gemini-3-flash-preview",
+    model: MODELS.flash,
     contents: prompt,
     config: {
       responseMimeType: "application/json",

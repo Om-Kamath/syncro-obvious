@@ -1,6 +1,7 @@
 import { GoogleGenAI, Type, FileState } from "@google/genai";
 import { startLog, finishLog } from "./logger";
 import { getApiKey } from "./apiKey";
+import { MODELS } from "./models";
 import { LruCache } from "../utils/lruCache";
 
 function getAI() {
@@ -48,7 +49,8 @@ async function getFileUri(file: File): Promise<string> {
 // -------------------------------------------------------------------
 // Helpers
 // -------------------------------------------------------------------
-function pcmBase64ToWavUrl(pcmBase64: string, sampleRate = 24000): string {
+/** Wraps headerless 16-bit mono PCM bytes (base64) in a WAV container. */
+export function pcmBase64ToWavBytes(pcmBase64: string, sampleRate = 24000): Uint8Array {
   const pcm = Uint8Array.from(atob(pcmBase64), c => c.charCodeAt(0));
   const numChannels = 1, bitsPerSample = 16;
   const blockAlign = (numChannels * bitsPerSample) / 8;
@@ -64,7 +66,20 @@ function pcmBase64ToWavUrl(pcmBase64: string, sampleRate = 24000): string {
   v.setUint16(34, bitsPerSample, true);
   enc(36, 'data'); v.setUint32(40, dataSize, true);
   new Uint8Array(buf, 44).set(pcm);
-  return URL.createObjectURL(new Blob([buf], { type: 'audio/wav' }));
+  return new Uint8Array(buf);
+}
+
+/**
+ * Converts a TTS inline-audio response to WAV bytes. Gemini 3.8 TTS returns
+ * ready-made audio/wav on unary requests, while 2.5-series TTS returned
+ * headerless raw PCM (audio/L16) — route on mimeType and pass WAV through
+ * untouched (wrapping an already-headered WAV corrupts it).
+ */
+export function inlineAudioToWavBytes(data: string, mimeType: string | undefined): Uint8Array {
+  if (mimeType?.toLowerCase().includes('wav')) {
+    return Uint8Array.from(atob(data), c => c.charCodeAt(0));
+  }
+  return pcmBase64ToWavBytes(data);
 }
 
 function getAudioDuration(url: string): Promise<number> {
@@ -83,7 +98,7 @@ export async function generateAudioFromScript(
   script: string,
   voiceName = 'Aoede'
 ): Promise<{ url: string; duration: number; transcription: string }> {
-  const MODEL = 'gemini-2.5-flash-preview-tts';
+  const MODEL = MODELS.tts;
   const log = startLog('TTS Generate', MODEL, `voice=${voiceName} | "${script.slice(0, 80)}${script.length > 80 ? '…' : ''}"`);
   try {
     const response = await getAI().models.generateContent({
@@ -95,10 +110,11 @@ export async function generateAudioFromScript(
       },
     });
 
-    const part = response.candidates?.[0]?.content?.parts?.[0] as { inlineData?: { data?: string } } | undefined;
+    const part = response.candidates?.[0]?.content?.parts?.[0] as { inlineData?: { data?: string; mimeType?: string } } | undefined;
     if (!part?.inlineData?.data) throw new Error('No audio returned from TTS');
 
-    const url = pcmBase64ToWavUrl(part.inlineData.data);
+    const wavBytes = inlineAudioToWavBytes(part.inlineData.data, part.inlineData.mimeType);
+    const url = URL.createObjectURL(new Blob([wavBytes], { type: 'audio/wav' }));
     const duration = await getAudioDuration(url);
     finishLog(log);
     return { url, duration, transcription: script };
@@ -112,7 +128,7 @@ export async function generateNarrationFromVideos(
   videoClips: Array<{ name: string; analysis: string; duration: number }>,
   voiceName = 'Aoede'
 ): Promise<{ url: string; duration: number; transcription: string }> {
-  const MODEL = 'gemini-2.5-flash-lite';
+  const MODEL = MODELS.flashLite;
   const totalDuration = videoClips.reduce((s, c) => s + c.duration, 0);
   const log = startLog('Generate Narration Script', MODEL, `${videoClips.length} clips | total ${totalDuration.toFixed(1)}s`);
   try {
@@ -162,8 +178,8 @@ export function estimateSegments(
 export async function analyzeVoiceover(
   audioFile: File
 ): Promise<{ transcription: string; segments: Array<{ text: string; start: number; end: number }> }> {
-  // gemini-2.5-flash-lite: same model as analyzeVideo — fast, cheap
-  const MODEL = 'gemini-2.5-flash-lite';
+  // flash-lite: fast, cheap, current GA — same model as analyzeVideo
+  const MODEL = MODELS.flashLite;
   const log = startLog('Analyze Voiceover', MODEL, audioFile.name);
   try {
     // Upload + measure duration in parallel
@@ -197,7 +213,7 @@ export async function analyzeVoiceover(
 }
 
 export async function analyzeVideo(videoFile: File): Promise<string> {
-  const MODEL = 'gemini-2.5-flash-lite';
+  const MODEL = MODELS.flashLite;
   const log = startLog('Analyze Video', MODEL, videoFile.name);
   try {
     const fileUri = await getFileUri(videoFile);
@@ -230,7 +246,7 @@ export async function suggestAlignment(
   voiceoverTranscription: string,
   videoClips: Array<{ id: string; name: string; analysis: string; duration?: number }>
 ): Promise<AlignmentEntry[]> {
-  const MODEL = 'gemini-2.5-flash-lite';
+  const MODEL = MODELS.flashLite;
   const log = startLog('Suggest Alignment', MODEL, `${videoClips.length} clips`);
   try {
     const prompt = `You are an expert video editor. Your task is to arrange video clips into the best playback order so the visuals naturally illustrate a voiceover narration.
