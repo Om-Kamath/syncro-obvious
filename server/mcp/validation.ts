@@ -193,10 +193,14 @@ function normalizeCaptionStyle(value: unknown): CaptionStyle {
   }
   return {
     mode: oneOf(value.mode, CAPTION_MODES, 'captionStyle.mode'),
+    // Legacy MCP payloads predate the style editor fields — default them the
+    // same way the saved-template validator does.
+    fontFamily: typeof value.fontFamily === 'string' ? value.fontFamily : 'Inter, Arial, sans-serif',
     fontSize: value.fontSize,
     color: value.color,
     bgColor: value.bgColor,
     position: oneOf(value.position, CAPTION_POSITIONS, 'captionStyle.position'),
+    wordHighlightColor: typeof value.wordHighlightColor === 'string' ? value.wordHighlightColor : '#7c3aed',
   };
 }
 

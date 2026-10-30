@@ -86,7 +86,7 @@ function projectFixture(clips: SerializedClip[] = []): ProjectRecord {
     state: {
       clips,
       voiceover: null,
-      captionStyle: { mode: 'lower-third', fontSize: 24, color: '#ffffff', bgColor: '#00000080', position: 'bottom' },
+      captionStyle: { mode: 'lower-third', fontFamily: 'Inter, Arial, sans-serif', fontSize: 24, color: '#ffffff', bgColor: '#00000080', position: 'bottom', wordHighlightColor: '#7c3aed' },
       captionsEnabled: false,
     },
   };

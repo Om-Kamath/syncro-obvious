@@ -1,18 +1,36 @@
-import { CaptionStyle } from '../types';
+import type { CaptionStyle } from '../types';
 
 /**
- * Canvas caption renderer shared by the video exporter and the GIF renderer so
- * burned-in captions look identical in both outputs.
+ * Caption sizes are authored against the preview pane. The export burn-in
+ * scales them proportionally to the canvas width so a caption that reads a
+ * given size in preview reads the same relative size in the exported video.
+ * 640px is the preview-pane width the default size (16px) was tuned against.
+ */
+export const CAPTION_PREVIEW_REFERENCE_WIDTH = 640;
+
+const MIN_EXPORT_FONT_SIZE = 12;
+
+export function scaledCaptionFontSize(fontSize: number, canvasWidth: number): number {
+  return Math.max(
+    MIN_EXPORT_FONT_SIZE,
+    Math.round(fontSize * (canvasWidth / CAPTION_PREVIEW_REFERENCE_WIDTH)),
+  );
+}
+
+/**
+ * Canvas caption renderer for the export burn-in. Extracted from
+ * PostProcessingPanel so the preview/export style contract is unit-testable
+ * and the panel stays UI-only.
  */
 export function drawCaptionOnCanvas(
   ctx: CanvasRenderingContext2D,
   W: number,
   H: number,
   text: string,
-  style: CaptionStyle
-) {
-  const fontSize = Math.max(16, Math.round(W * 0.032));
-  ctx.font = `bold ${fontSize}px Inter, Arial, sans-serif`;
+  style: CaptionStyle,
+): void {
+  const fontSize = scaledCaptionFontSize(style.fontSize, W);
+  ctx.font = `bold ${fontSize}px ${style.fontFamily}`;
   ctx.textAlign = 'center';
 
   const maxW = W * 0.8;

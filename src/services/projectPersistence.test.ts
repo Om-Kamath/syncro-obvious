@@ -321,5 +321,5 @@ describe('projectPersistence media round-trip', () => {
 });
 
 function defaultCaptionStyle(): CaptionStyle {
-  return { mode: 'word-highlight', fontSize: 24, color: '#ffffff', bgColor: 'rgba(0,0,0,0.5)', position: 'bottom' };
+  return { mode: 'word-highlight', fontFamily: 'Inter, Arial, sans-serif', fontSize: 24, color: '#ffffff', bgColor: 'rgba(0,0,0,0.5)', position: 'bottom', wordHighlightColor: '#7c3aed' };
 }

@@ -161,7 +161,7 @@ function validState(overrides: Partial<ProjectStatePayload> = {}): ProjectStateP
   return {
     clips: [baseClip()],
     voiceover,
-    captionStyle: { mode: 'word-highlight', fontSize: 32, color: '#ffffff', bgColor: '#000000', position: 'bottom' },
+    captionStyle: { mode: 'word-highlight', fontFamily: 'Inter, Arial, sans-serif', fontSize: 32, color: '#ffffff', bgColor: '#000000', position: 'bottom', wordHighlightColor: '#7c3aed' },
     captionsEnabled: true,
     ...overrides,
   };
@@ -228,7 +228,7 @@ describe('create_project', () => {
     { label: 'missing state', args: { name: 'X' }, message: '' },
     { label: 'negative clip duration', args: { name: 'X', state: validState({ clips: [baseClip({ duration: -1 })] }) }, message: 'clips[0].duration must be >= 0' },
     { label: 'unknown transition', args: { name: 'X', state: validState({ clips: [baseClip({ transitionIn: 'zoom' as never })] }) }, message: 'clips[0].transitionIn must be one of cut, fade, dissolve, wipe' },
-    { label: 'unknown caption mode', args: { name: 'X', state: validState({ captionStyle: { mode: 'karaoke' as never, fontSize: 32, color: '#fff', bgColor: '#000', position: 'bottom' } }) }, message: 'captionStyle.mode must be one of lower-third, word-highlight, speaker-labeled' },
+    { label: 'unknown caption mode', args: { name: 'X', state: validState({ captionStyle: { mode: 'karaoke' as never, fontFamily: 'Inter, Arial, sans-serif', fontSize: 32, color: '#fff', bgColor: '#000', position: 'bottom', wordHighlightColor: '#7c3aed' } }) }, message: 'captionStyle.mode must be one of lower-third, word-highlight, speaker-labeled' },
     { label: 'segment start after end', args: { name: 'X', state: validState({ voiceover: { duration: 10, segments: [{ text: 'a', start: 5, end: 4 }] } }) }, message: 'voiceover.segments[0].start must be <= voiceover.segments[0].end' },
     { label: 'word start after end', args: { name: 'X', state: validState({ voiceover: { duration: 10, segments: [{ text: 'a', start: 0, end: 1, words: [{ word: 'a', start: 1, end: 0 }] }] } }) }, message: 'voiceover.segments[0].words[0].start must be <= voiceover.segments[0].words[0].end' },
   ])('rejects $label without touching the API', async ({ args, message }) => {

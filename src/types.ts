@@ -69,10 +69,12 @@ export interface CaptionSegment {
 
 export interface CaptionStyle {
   mode: CaptionMode;
-  fontSize: number;
-  color: string;
-  bgColor: string;
+  fontFamily: string;         // CSS font stack — honored by preview and export burn-in
+  fontSize: number;           // px, authored against the preview pane
+  color: string;              // caption text fill
+  bgColor: string;            // caption box fill
   position: 'bottom' | 'top';
+  wordHighlightColor: string; // fill of the current word in word-highlight mode
   preset?: CaptionPresetName; // named look this style came from; manual edits clear it
 }
 

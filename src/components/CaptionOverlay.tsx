@@ -29,9 +29,9 @@ export function CaptionOverlay({
     return (
       <div className={baseContainer}>
         <div className="px-4 py-2 rounded-xl flex flex-wrap gap-x-1.5 gap-y-1 justify-center max-w-2xl"
-          style={{ backgroundColor: style.bgColor, fontSize: `${style.fontSize}px` }}>
+          style={{ backgroundColor: style.bgColor, fontSize: `${style.fontSize}px`, fontFamily: style.fontFamily }}>
           {words.map((w, i) => (
-            <span key={i} style={{ color: i === wordIdx ? '#7c3aed' : style.color, fontWeight: i === wordIdx ? 700 : 500, transition: 'color 0.1s' }}>{w.word}</span>
+            <span key={i} style={{ color: i === wordIdx ? style.wordHighlightColor : style.color, fontWeight: i === wordIdx ? 700 : 500, transition: 'color 0.1s' }}>{w.word}</span>
           ))}
         </div>
       </div>
@@ -40,7 +40,7 @@ export function CaptionOverlay({
   if (style.mode === 'speaker-labeled') {
     return (
       <div className={baseContainer}>
-        <div className="px-4 py-2 rounded-xl max-w-2xl" style={{ backgroundColor: style.bgColor, fontSize: `${style.fontSize}px` }}>
+        <div className="px-4 py-2 rounded-xl max-w-2xl" style={{ backgroundColor: style.bgColor, fontSize: `${style.fontSize}px`, fontFamily: style.fontFamily }}>
           <span style={{ color: '#7c3aed', fontWeight: 700, marginRight: '8px' }}>Speaker:</span>
           <span style={{ color: style.color }}>{seg.text}</span>
         </div>
@@ -50,7 +50,7 @@ export function CaptionOverlay({
   return (
     <div className={baseContainer}>
       <div className="px-5 py-2.5 rounded-xl max-w-2xl text-center"
-        style={{ backgroundColor: style.bgColor, color: style.color, fontSize: `${style.fontSize}px`, fontWeight: 600 }}>
+        style={{ backgroundColor: style.bgColor, color: style.color, fontSize: `${style.fontSize}px`, fontFamily: style.fontFamily, fontWeight: 600 }}>
         {seg.text}
       </div>
     </div>

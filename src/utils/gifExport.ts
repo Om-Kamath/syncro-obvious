@@ -7,7 +7,7 @@ import { GIFEncoder, quantize, applyPalette } from 'gifenc';
 import { CaptionStyle, VideoClip, Voiceover } from '../types';
 import { ExportPreset, computeDrawGeometry } from './exportPresets';
 import { getClipAtTime } from './exportUtils';
-import { drawCaptionOnCanvas } from './captionDraw';
+import { drawCaptionOnCanvas } from './captionCanvas';
 
 // ── Frame-budget limits ─────────────────────────────────────────────────────
 /** The planner clamps any fps/width input into these ranges. */

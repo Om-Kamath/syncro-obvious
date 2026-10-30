@@ -15,6 +15,8 @@ const DEFAULT_CAPTION_STYLE = {
   color: '#ffffff',
   bgColor: '#000000',
   position: 'bottom',
+  fontFamily: 'Inter, Arial, sans-serif',
+  wordHighlightColor: '#7c3aed',
 } as const;
 
 /** Fixture factory for saved-project records matching the REST contract. */

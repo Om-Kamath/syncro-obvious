@@ -18,6 +18,8 @@ const style: CaptionStyle = {
   color: '#fbbf24',
   bgColor: '#111827',
   position: 'top',
+  fontFamily: 'Inter, Arial, sans-serif',
+  wordHighlightColor: '#7c3aed',
 };
 
 const template: CaptionTemplate = { id: 'tpl1', name: 'Bold Pop', style, createdAt: 1_730_000_000_000 };
