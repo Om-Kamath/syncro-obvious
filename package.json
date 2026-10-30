@@ -10,10 +10,12 @@
     "clean": "rm -rf dist",
     "lint": "tsc --noEmit && eslint .",
     "test": "vitest run",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "mcp": "tsx server/mcp/index.ts"
   },
   "dependencies": {
     "@google/genai": "^1.29.0",
+    "@modelcontextprotocol/sdk": "^1.32.2",
     "@tailwindcss/vite": "^4.1.14",
     "@vitejs/plugin-react": "^5.0.4",
     "better-sqlite3": "^12.4.1",
@@ -44,6 +46,7 @@
     "globals": "^17.13.0",
     "jsdom": "^29.1.1",
     "tailwindcss": "^4.1.14",
+    "tsx": "^4.23.15",
     "typescript": "~5.8.2",
     "typescript-eslint": "^8.72.1",
     "vite": "^6.2.0",
