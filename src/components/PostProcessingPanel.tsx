@@ -126,6 +126,28 @@ function CopyButton({ text, className }: { text: string; className?: string }) {
   );
 }
 
+// Color swatch with an accessible name and a CSS tooltip revealed on hover and
+// keyboard focus — native `title` would not surface for keyboard users.
+export function CaptionColorSwatch({ label, value, onChange }: { label: string; value: string; onChange: (color: string) => void }) {
+  return (
+    <span className="relative inline-flex group">
+      <input
+        type="color"
+        aria-label={label}
+        value={value}
+        onChange={e => onChange(e.target.value)}
+        className="w-8 h-8 rounded-lg border-0 cursor-pointer bg-transparent"
+      />
+      <span
+        aria-hidden="true"
+        className="pointer-events-none absolute left-1/2 -translate-x-1/2 -top-8 z-10 whitespace-nowrap rounded-md bg-gray-900 px-2 py-1 text-xs font-medium text-white opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-within:opacity-100"
+      >
+        {label}
+      </span>
+    </span>
+  );
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // TAB 1 — Description & Chapters
 // ═══════════════════════════════════════════════════════════════════════════
@@ -522,11 +544,10 @@ export function CaptionsTab({
         <div className="space-y-2">
           <p className="text-xs font-bold uppercase tracking-widest text-gray-400">Text Color</p>
           <div className="flex items-center gap-3 p-2.5 bg-gray-50 border border-gray-100 rounded-xl">
-            <input
-              type="color"
+            <CaptionColorSwatch
+              label="Text Color"
               value={captionStyle.color}
-              onChange={e => updateStyle({ color: e.target.value })}
-              className="w-8 h-8 rounded-lg border-0 cursor-pointer bg-transparent"
+              onChange={color => updateStyle({ color })}
             />
             <span className="text-xs font-mono text-gray-500">{captionStyle.color}</span>
           </div>
@@ -534,11 +555,10 @@ export function CaptionsTab({
         <div className="space-y-2">
           <p className="text-xs font-bold uppercase tracking-widest text-gray-400">Background</p>
           <div className="flex items-center gap-3 p-2.5 bg-gray-50 border border-gray-100 rounded-xl">
-            <input
-              type="color"
+            <CaptionColorSwatch
+              label="Background Color"
               value={captionStyle.bgColor}
-              onChange={e => updateStyle({ bgColor: e.target.value })}
-              className="w-8 h-8 rounded-lg border-0 cursor-pointer bg-transparent"
+              onChange={bgColor => updateStyle({ bgColor })}
             />
             <span className="text-xs font-mono text-gray-500">{captionStyle.bgColor}</span>
           </div>
