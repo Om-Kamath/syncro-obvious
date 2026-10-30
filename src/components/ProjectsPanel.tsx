@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { AlertTriangle, Folder, FolderOpen, RotateCw, Trash2 } from 'lucide-react';
 import { SavedProjectSummary } from '../types';
 
@@ -17,6 +17,24 @@ function formatUpdatedAt(iso: string): string {
   return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
+// Stops Tab may move focus between while the confirmation is open. Disabled
+// controls are excluded (they can't receive focus).
+const FOCUSABLE_SELECTOR =
+  'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+// Returns the stop Tab should jump to keep focus inside the confirmation, or
+// null to let the browser move focus normally.
+function nextFocusable(
+  focusables: HTMLElement[],
+  active: Element | null,
+  shiftKey: boolean,
+): HTMLElement | null {
+  if (focusables.length === 0) return null;
+  const index = active instanceof HTMLElement ? focusables.indexOf(active) : -1;
+  if (shiftKey) return index <= 0 ? focusables[focusables.length - 1] : null;
+  return index === focusables.length - 1 ? focusables[0] : null;
+}
+
 // Presentational list of saved projects. The parent owns persistence and the
 // list state; open/delete emit intent via callbacks so this stays testable and
 // backend-agnostic (localStorage today, the projects API later).
@@ -29,16 +47,68 @@ export function ProjectsPanel({
   onRetry,
 }: ProjectsPanelProps) {
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  // The trash button that opened the confirmation (unmounted while it shows),
+  // so focus can return there when the confirmation is dismissed.
+  const deleteTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const cancelButtonRef = useRef<HTMLButtonElement>(null);
+  const headingRef = useRef<HTMLHeadingElement>(null);
+  // Where focus should go when the confirmation closes: back to the trigger
+  // after a cancel, or to the panel heading after the project was deleted.
+  const closeFocusRef = useRef<'trigger' | 'panel' | null>(null);
+
+  // The confirmation replaces the row in place, so focus needs help both
+  // ways: into the dialog when it opens, back out to where the user came
+  // from when it closes.
+  useEffect(() => {
+    if (confirmDeleteId) {
+      // Focus the non-destructive action so a stray Enter can't delete.
+      cancelButtonRef.current?.focus();
+      return;
+    }
+    if (!closeFocusRef.current) return;
+    const mode = closeFocusRef.current;
+    closeFocusRef.current = null;
+    if (mode === 'trigger') {
+      const trigger = deleteTriggerRef.current;
+      if (trigger?.isConnected) trigger.focus();
+    } else {
+      headingRef.current?.focus();
+    }
+  }, [confirmDeleteId]);
 
   const confirmDelete = () => {
     if (confirmDeleteId) onDelete(confirmDeleteId);
+    closeFocusRef.current = 'panel';
     setConfirmDeleteId(null);
+  };
+
+  const cancelDelete = () => {
+    closeFocusRef.current = 'trigger';
+    setConfirmDeleteId(null);
+  };
+
+  // Escape dismisses the confirmation; Tab is cycled within its own controls.
+  const handleDialogKeyDown = (event: ReactKeyboardEvent<HTMLElement>) => {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      cancelDelete();
+      return;
+    }
+    if (event.key !== 'Tab') return;
+    const focusables = Array.from(
+      event.currentTarget.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR),
+    );
+    const target = nextFocusable(focusables, document.activeElement, event.shiftKey);
+    if (target) {
+      event.preventDefault();
+      target.focus();
+    }
   };
 
   return (
     <section className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
       <div className="px-5 py-4 border-b border-gray-50 flex items-center justify-between">
-        <h2 className="text-xs font-bold uppercase tracking-wider text-gray-400 flex items-center gap-2">
+        <h2 ref={headingRef} tabIndex={-1} className="text-xs font-bold uppercase tracking-wider text-gray-400 flex items-center gap-2">
           <Folder className="w-3.5 h-3.5" /> Saved Projects
         </h2>
         {projects.length > 0 && (
@@ -75,10 +145,13 @@ export function ProjectsPanel({
             confirmDeleteId === project.id ? (
               <div
                 key={project.id}
+                role="alertdialog"
+                aria-modal="true"
+                aria-labelledby={`delete-confirm-title-${project.id}`}
+                onKeyDown={handleDialogKeyDown}
                 className="border border-red-200 bg-red-50 rounded-xl p-3"
-                aria-live="polite"
               >
-                <p className="text-xs font-semibold text-red-600">
+                <p id={`delete-confirm-title-${project.id}`} className="text-xs font-semibold text-red-600">
                   Delete &ldquo;{project.name}&rdquo;? This can&rsquo;t be undone.
                 </p>
                 <div className="flex gap-2 mt-2">
@@ -90,7 +163,8 @@ export function ProjectsPanel({
                     <Trash2 className="w-3.5 h-3.5 inline mr-1" /> Delete
                   </button>
                   <button
-                    onClick={() => setConfirmDeleteId(null)}
+                    ref={cancelButtonRef}
+                    onClick={cancelDelete}
                     aria-label={`Cancel delete ${project.name}`}
                     className="text-xs font-semibold text-gray-600 hover:text-gray-800 px-3 py-1.5 rounded-lg border border-gray-200 bg-white transition-colors"
                   >
@@ -117,7 +191,10 @@ export function ProjectsPanel({
                     <FolderOpen className="w-3.5 h-3.5" />
                   </button>
                   <button
-                    onClick={() => setConfirmDeleteId(project.id)}
+                    onClick={event => {
+                      deleteTriggerRef.current = event.currentTarget;
+                      setConfirmDeleteId(project.id);
+                    }}
                     aria-label={`Delete ${project.name}`}
                     title="Delete this project"
                     className="p-1.5 text-gray-300 hover:text-red-400 transition-colors"

@@ -71,6 +71,53 @@ describe('ProjectsPanel', () => {
     expect(onDelete).not.toHaveBeenCalled();
   });
 
+  it('moves focus to Cancel when the confirmation opens and back to the trigger on cancel', () => {
+    renderPanel();
+    fireEvent.click(screen.getByRole('button', { name: 'Delete Launch Teaser' }));
+    expect(document.activeElement).toBe(
+      screen.getByRole('button', { name: 'Cancel delete Launch Teaser' }),
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel delete Launch Teaser' }));
+    expect(document.activeElement).toBe(
+      screen.getByRole('button', { name: 'Delete Launch Teaser' }),
+    );
+  });
+
+  it('cancels on Escape and returns focus to the delete trigger', () => {
+    const { onDelete } = renderPanel();
+    fireEvent.click(screen.getByRole('button', { name: 'Delete Launch Teaser' }));
+    fireEvent.keyDown(screen.getByRole('alertdialog'), { key: 'Escape' });
+    expect(screen.queryByText(/This can’t be undone\./)).toBeNull();
+    expect(onDelete).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(
+      screen.getByRole('button', { name: 'Delete Launch Teaser' }),
+    );
+  });
+
+  it('traps Tab within the confirmation controls', () => {
+    renderPanel();
+    fireEvent.click(screen.getByRole('button', { name: 'Delete Launch Teaser' }));
+    const dialog = screen.getByRole('alertdialog');
+    // Focus opens on Cancel (the last stop) — Tab wraps to the Delete button.
+    fireEvent.keyDown(dialog, { key: 'Tab' });
+    expect(document.activeElement).toBe(
+      screen.getByRole('button', { name: 'Confirm delete Launch Teaser' }),
+    );
+    // Shift+Tab from Delete wraps back to Cancel.
+    fireEvent.keyDown(dialog, { key: 'Tab', shiftKey: true });
+    expect(document.activeElement).toBe(
+      screen.getByRole('button', { name: 'Cancel delete Launch Teaser' }),
+    );
+  });
+
+  it('returns focus to the panel heading after a confirmed delete', () => {
+    const { onDelete } = renderPanel();
+    fireEvent.click(screen.getByRole('button', { name: 'Delete Launch Teaser' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm delete Launch Teaser' }));
+    expect(onDelete).toHaveBeenCalledWith('p-1');
+    expect(document.activeElement).toBe(screen.getByText('Saved Projects'));
+  });
+
   it('moves the confirmation when another row requests deletion', () => {
     renderPanel();
     fireEvent.click(screen.getByRole('button', { name: 'Delete Launch Teaser' }));
