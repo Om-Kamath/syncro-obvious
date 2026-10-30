@@ -1,6 +1,7 @@
 import { GoogleGenAI, Type, FileState } from "@google/genai";
 import { startLog, finishLog } from "./logger";
 import { getApiKey } from "./apiKey";
+import { LruCache } from "../utils/lruCache";
 
 function getAI() {
   const apiKey = getApiKey();
@@ -11,14 +12,17 @@ function getAI() {
 // -------------------------------------------------------------------
 // Files API — upload once, reuse URI across calls
 // Cache key: `${file.name}::${file.size}` (stable for same file object)
+// Bounded LRU: evicted URIs simply cause a re-upload on next use.
 // -------------------------------------------------------------------
-const fileUriCache = new Map<string, string>();
+const FILE_URI_CACHE_MAX = 20;
+const fileUriCache = new LruCache<string, string>(FILE_URI_CACHE_MAX);
 
 async function getFileUri(file: File): Promise<string> {
   const cacheKey = `${file.name}::${file.size}`;
-  if (fileUriCache.has(cacheKey)) {
+  const cachedUri = fileUriCache.get(cacheKey);
+  if (cachedUri !== undefined) {
     console.debug(`[gemini] reusing cached URI for "${file.name}"`);
-    return fileUriCache.get(cacheKey)!;
+    return cachedUri;
   }
 
   console.debug(`[gemini] uploading "${file.name}" (${(file.size / 1024).toFixed(1)} KB) via Files API…`);
