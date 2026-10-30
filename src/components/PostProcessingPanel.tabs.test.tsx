@@ -15,8 +15,12 @@ vi.mock('../services/postProcessing', () => ({
   identifyKeyMoments: identifyKeyMomentsMock,
 }));
 
-import { DescriptionTab, ThumbnailsTab } from './PostProcessingPanel';
-import type { VideoClip, Voiceover } from '../types';
+import {
+  DescriptionTab,
+  ThumbnailsTab,
+  PostProcessingPanel,
+} from './PostProcessingPanel';
+import type { CaptionStyle, VideoClip, Voiceover } from '../types';
 
 const voiceover: Voiceover = {
   url: 'blob:voiceover',
@@ -77,5 +81,58 @@ describe('surfaced postProcessing errors', () => {
       expect(screen.getByText(/returned an empty response/)).toBeDefined()
     );
     expect(screen.queryByText('Failed to identify key moments. Please try again.')).toBeNull();
+  });
+});
+
+// Tab-strip focus order: locked tabs look disabled (gray, lock icon) and do
+// nothing when clicked, so they must also be removed from the tab order —
+// otherwise keyboard users tab through dead controls to reach the unlocked
+// tabs (e.g. Export, and the Publish checklist once it ships).
+describe('tab strip focus order', () => {
+  afterEach(cleanup);
+
+  const captionStyle: CaptionStyle = {
+    mode: 'lower-third',
+    fontSize: 16,
+    color: '#ffffff',
+    bgColor: '#000000',
+    position: 'bottom',
+  };
+
+  const renderLockedPanel = () =>
+    render(
+      <PostProcessingPanel
+        voiceover={null}
+        videoClips={[]}
+        currentTime={0}
+        captionStyle={captionStyle}
+        captionsEnabled={false}
+        onCaptionStyleChange={() => {}}
+        onCaptionsEnabledChange={() => {}}
+        onImportCaptions={() => {}}
+      />
+    );
+
+  it('renders locked tabs as disabled so they leave the tab order', () => {
+    renderLockedPanel();
+    for (const label of ['Description', 'Captions', 'Thumbnails']) {
+      expect(screen.getByRole('button', { name: label }).hasAttribute('disabled')).toBe(true);
+    }
+    // Unlocked tabs stay operable.
+    expect(screen.getByRole('button', { name: 'Export' }).hasAttribute('disabled')).toBe(false);
+  });
+
+  it('focus() on a locked tab does not move focus to it', () => {
+    renderLockedPanel();
+    const captions = screen.getByRole('button', { name: 'Captions' });
+    captions.focus();
+    expect(document.activeElement).not.toBe(captions);
+  });
+
+  it('focus() still reaches unlocked tabs', () => {
+    renderLockedPanel();
+    const exportTab = screen.getByRole('button', { name: 'Export' });
+    exportTab.focus();
+    expect(document.activeElement).toBe(exportTab);
   });
 });
