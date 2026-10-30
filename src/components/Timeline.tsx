@@ -10,6 +10,9 @@ function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
+// Shared visible focus indicator for every interactive timeline control.
+const FOCUS_RING = 'focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:ring-offset-1';
+
 interface TimelineProps {
   voiceover: Voiceover | null;
   videoClips: VideoClip[];
@@ -78,6 +81,7 @@ export const Timeline: React.FC<TimelineProps> = ({
   const [transitionPopoverId, setTransitionPopoverId] = useState<string | null>(null);
   const [transitionPopoverPos, setTransitionPopoverPos] = useState<{ x: number; y: number } | null>(null);
   const [altPopover, setAltPopover] = useState<{ clipId: string; x: number; y: number } | null>(null);
+  const [selectedClipId, setSelectedClipId] = useState<string | null>(null);
 
   const clipDragRef = useRef<ClipDragState | null>(null);
   const trimDragRef = useRef<TrimDragState | null>(null);
@@ -281,8 +285,30 @@ export const Timeline: React.FC<TimelineProps> = ({
   const handleClipMouseDown = (e: React.MouseEvent, clip: VideoClip) => {
     e.stopPropagation(); e.preventDefault();
     clipDragRef.current = { id: clip.id, startMouseX: e.clientX, startClipTime: clip.startTime, startTrack: clip.track ?? 0 };
+    setSelectedClipId(clip.id);
     setDraggingClipId(clip.id);
     setTransitionPopoverId(null);
+  };
+  // Keyboard mirror of the mouse trim drag — same clamps, fixed step.
+  const handleTrimKeyDown = (e: React.KeyboardEvent, clip: VideoClip, side: TrimSide) => {
+    const step = e.shiftKey ? 1 : 0.1;
+    let delta = 0;
+    if (e.key === 'ArrowLeft') delta = -step;
+    else if (e.key === 'ArrowRight') delta = step;
+    else return;
+    e.preventDefault(); e.stopPropagation();
+    const trimStart = clip.trimStart ?? 0;
+    const trimmedDuration = clip.trimmedDuration ?? (clip.duration - trimStart);
+    onVideoClipChange(videoClipsRef.current.map((c: VideoClip) => {
+      if (c.id !== clip.id) return c;
+      if (side === 'right') {
+        const next = Math.max(0.5, Math.min(trimmedDuration + delta, c.duration - trimStart));
+        return { ...c, trimmedDuration: next };
+      }
+      const clamped = Math.max(0, Math.min(delta, trimmedDuration - 0.5));
+      const newTrimStart = trimStart + clamped;
+      return { ...c, trimStart: newTrimStart > 0 ? newTrimStart : undefined, startTime: Math.max(0, c.startTime + clamped), trimmedDuration: trimmedDuration - clamped };
+    }));
   };
   const handleVoiceoverMouseDown = (e: React.MouseEvent) => {
     e.stopPropagation(); e.preventDefault();
@@ -302,7 +328,7 @@ export const Timeline: React.FC<TimelineProps> = ({
       {/* Header */}
       <div className="px-4 py-3 border-b border-gray-200 flex items-center justify-between bg-gray-50">
         <div className="flex items-center gap-3">
-          <button onClick={togglePlay} className="p-2 rounded-full bg-violet-600 text-white hover:bg-violet-500 transition-colors">
+          <button onClick={togglePlay} aria-label={isPlaying ? 'Pause timeline' : 'Play timeline'} className={`p-2 rounded-full bg-violet-600 text-white hover:bg-violet-500 transition-colors ${FOCUS_RING}`}>
             {isPlaying ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
           </button>
           <span className="text-xs font-mono text-gray-400">{currentTime.toFixed(2)}s / {totalDuration.toFixed(2)}s</span>
@@ -312,7 +338,7 @@ export const Timeline: React.FC<TimelineProps> = ({
               onClick={() => handleZoom(-1)}
               title="Zoom out"
               aria-label="Zoom out timeline"
-              className="p-1.5 rounded-lg text-gray-500 bg-white border border-gray-200 hover:border-violet-300 hover:text-violet-600 transition-all"
+              className={`p-1.5 rounded-lg text-gray-500 bg-white border border-gray-200 hover:border-violet-300 hover:text-violet-600 transition-all ${FOCUS_RING}`}
             >
               <Minus className="w-3.5 h-3.5" />
             </button>
@@ -321,7 +347,7 @@ export const Timeline: React.FC<TimelineProps> = ({
               onClick={() => handleZoom(1)}
               title="Zoom in"
               aria-label="Zoom in timeline"
-              className="p-1.5 rounded-lg text-gray-500 bg-white border border-gray-200 hover:border-violet-300 hover:text-violet-600 transition-all"
+              className={`p-1.5 rounded-lg text-gray-500 bg-white border border-gray-200 hover:border-violet-300 hover:text-violet-600 transition-all ${FOCUS_RING}`}
             >
               <Plus className="w-3.5 h-3.5" />
             </button>
@@ -329,7 +355,7 @@ export const Timeline: React.FC<TimelineProps> = ({
               onClick={handleFitToWindow}
               title="Fit timeline to window"
               aria-label="Fit timeline to window"
-              className="flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-medium text-gray-500 bg-white border border-gray-200 hover:border-violet-300 hover:text-violet-600 transition-all"
+              className={`flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-medium text-gray-500 bg-white border border-gray-200 hover:border-violet-300 hover:text-violet-600 transition-all ${FOCUS_RING}`}
             >
               <Maximize2 className="w-3.5 h-3.5" /> Fit
             </button>
@@ -337,7 +363,7 @@ export const Timeline: React.FC<TimelineProps> = ({
           <div className="w-px h-4 bg-gray-200" />
           <button
             onClick={() => setExtraTracks(t => t + 1)}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-gray-500 bg-white border border-gray-200 hover:border-violet-300 hover:text-violet-600 hover:bg-violet-50 transition-all"
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-gray-500 bg-white border border-gray-200 hover:border-violet-300 hover:text-violet-600 hover:bg-violet-50 transition-all ${FOCUS_RING}`}
           >
             <Plus className="w-3.5 h-3.5" /> Add Track
           </button>
@@ -345,7 +371,7 @@ export const Timeline: React.FC<TimelineProps> = ({
         <button
           onClick={onAutoAlign}
           disabled={isAligning || !voiceover || videoClips.length === 0}
-          className={cn('flex items-center gap-2 px-4 py-2 rounded-xl font-medium text-sm transition-all bg-violet-500 text-white hover:bg-violet-400 disabled:opacity-50 disabled:cursor-not-allowed', isAligning && 'animate-pulse')}
+          className={cn('flex items-center gap-2 px-4 py-2 rounded-xl font-medium text-sm transition-all bg-violet-500 text-white hover:bg-violet-400 disabled:opacity-50 disabled:cursor-not-allowed', isAligning && 'animate-pulse', FOCUS_RING)}
         >
           <Wand2 className="w-4 h-4" />
           {isAligning ? 'Analyzing…' : 'Auto-Align with AI'}
@@ -362,7 +388,7 @@ export const Timeline: React.FC<TimelineProps> = ({
         <div style={{ width: `${TRACK_PADDING + (totalDuration + 5) * pixelsPerSecond}px`, minWidth: '100%', padding: '8px 32px 16px 0' }}>
 
           {/* Time Ruler */}
-          <div style={{ marginLeft: TRACK_PADDING, height: 28, borderBottom: '1px solid #e5e7eb', position: 'relative' }} className="pointer-events-none">
+          <div aria-hidden="true" style={{ marginLeft: TRACK_PADDING, height: 28, borderBottom: '1px solid #e5e7eb', position: 'relative' }} className="pointer-events-none">
             {Array.from({ length: Math.ceil(totalDuration) + 5 }).map((_, i) => (
               <div key={i} className="absolute bottom-0 flex flex-col items-start" style={{ left: `${i * pixelsPerSecond}px` }}>
                 <span className="text-[10px] text-gray-400 font-mono" style={{ position: 'absolute', top: 2, left: 3 }}>{i}s</span>
@@ -377,8 +403,22 @@ export const Timeline: React.FC<TimelineProps> = ({
             style={{ left: `${TRACK_PADDING + currentTime * pixelsPerSecond}px`, zIndex: 50 }}
           >
             <div
-              className="absolute top-0 -left-1.5 w-3 h-3 bg-violet-500 rounded-full cursor-ew-resize pointer-events-auto"
+              role="slider"
+              tabIndex={0}
+              aria-label="Playhead position"
+              aria-valuemin={0}
+              aria-valuemax={Math.round(totalDuration * 100) / 100}
+              aria-valuenow={Math.round(currentTime * 100) / 100}
+              aria-valuetext={`${currentTime.toFixed(2)} seconds`}
+              className={`absolute top-0 -left-1.5 w-3 h-3 bg-violet-500 rounded-full cursor-ew-resize pointer-events-auto ${FOCUS_RING}`}
               onMouseDown={(e) => { e.stopPropagation(); setIsDraggingPlayhead(true); }}
+              onKeyDown={(e) => {
+                const step = e.shiftKey ? 5 : 1;
+                if (e.key === 'ArrowLeft') { e.preventDefault(); seekToTime(currentTimeRef.current - step); }
+                else if (e.key === 'ArrowRight') { e.preventDefault(); seekToTime(currentTimeRef.current + step); }
+                else if (e.key === 'Home') { e.preventDefault(); seekToTime(0); }
+                else if (e.key === 'End') { e.preventDefault(); seekToTime(totalDuration); }
+              }}
             />
           </div>
 
@@ -391,6 +431,8 @@ export const Timeline: React.FC<TimelineProps> = ({
                 <span className="text-[9px] font-bold text-violet-400 uppercase tracking-wider">VO</span>
               </div>
               <div
+                role="group"
+                aria-label="Voiceover track"
                 className={cn('relative h-20 bg-violet-50 rounded-xl border border-violet-200 overflow-hidden cursor-grab active:cursor-grabbing', isDraggingVoiceover && 'ring-2 ring-violet-500/30 shadow-lg opacity-90')}
                 onMouseDown={handleVoiceoverMouseDown}
                 style={{
@@ -436,19 +478,40 @@ export const Timeline: React.FC<TimelineProps> = ({
                           <React.Fragment key={clip.id}>
                             <div
                               data-clip="true"
+                              role="button"
+                              tabIndex={0}
+                              aria-label={`Clip: ${clip.name}, ${effectiveDuration.toFixed(1)} seconds`}
+                              aria-pressed={selectedClipId === clip.id}
                               onMouseDown={(e) => handleClipMouseDown(e, clip)}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter' || e.key === ' ') {
+                                  e.preventDefault();
+                                  setSelectedClipId((id) => (id === clip.id ? null : clip.id));
+                                } else if (e.key === 'Escape') {
+                                  setSelectedClipId(null);
+                                }
+                              }}
                               className={cn(
                                 'absolute h-full rounded-xl border flex flex-col justify-center px-3 select-none group/clip cursor-grab active:cursor-grabbing',
                                 isActive ? 'bg-violet-600 border-violet-700 ring-2 ring-violet-300/50 shadow-md' : 'bg-violet-100 border-violet-300 shadow-sm hover:shadow-md hover:border-violet-400',
-                                (isDragging || isTrimDragging) && 'shadow-xl ring-2 ring-violet-400/40 opacity-90'
+                                (isDragging || isTrimDragging) && 'shadow-xl ring-2 ring-violet-400/40 opacity-90',
+                                selectedClipId === clip.id && 'ring-2 ring-offset-2 ring-violet-600',
+                                FOCUS_RING
                               )}
                               style={{ left: `${clip.startTime * pixelsPerSecond}px`, width: `${effectiveDuration * pixelsPerSecond}px`, zIndex: isDragging ? 100 : 2 }}
                             >
                               {/* Left trim */}
                               <div
                                 data-trim-handle="left"
+                                role="slider"
+                                tabIndex={0}
+                                aria-label={`Trim clip start: ${(clip.trimStart ?? 0).toFixed(1)} seconds in`}
+                                aria-valuemin={0}
+                                aria-valuemax={Math.round(clip.duration * 10) / 10}
+                                aria-valuenow={Math.round((clip.trimStart ?? 0) * 10) / 10}
                                 onMouseDown={(e) => handleTrimHandleMouseDown(e, clip, 'left')}
-                                className="absolute left-0 top-0 bottom-0 w-2.5 flex items-center justify-center cursor-col-resize rounded-l-xl z-10 opacity-0 group-hover/clip:opacity-100 transition-opacity bg-violet-500/80 hover:bg-violet-500"
+                                onKeyDown={(e) => handleTrimKeyDown(e, clip, 'left')}
+                                className={`absolute left-0 top-0 bottom-0 w-2.5 flex items-center justify-center cursor-col-resize rounded-l-xl z-10 opacity-0 group-hover/clip:opacity-100 focus-visible:opacity-100 transition-opacity bg-violet-500/80 hover:bg-violet-500 ${FOCUS_RING}`}
                               >
                                 <div className="w-0.5 h-4 bg-white/70 rounded-full" />
                               </div>
@@ -470,8 +533,15 @@ export const Timeline: React.FC<TimelineProps> = ({
                               {/* Right trim */}
                               <div
                                 data-trim-handle="right"
+                                role="slider"
+                                tabIndex={0}
+                                aria-label={`Trim clip end: ${effectiveDuration.toFixed(1)} seconds long`}
+                                aria-valuemin={0.5}
+                                aria-valuemax={Math.round((clip.duration - (clip.trimStart ?? 0)) * 10) / 10}
+                                aria-valuenow={Math.round(effectiveDuration * 10) / 10}
                                 onMouseDown={(e) => handleTrimHandleMouseDown(e, clip, 'right')}
-                                className="absolute right-0 top-0 bottom-0 w-2.5 flex items-center justify-center cursor-col-resize rounded-r-xl z-10 opacity-0 group-hover/clip:opacity-100 transition-opacity bg-orange-400/80 hover:bg-orange-400"
+                                onKeyDown={(e) => handleTrimKeyDown(e, clip, 'right')}
+                                className={`absolute right-0 top-0 bottom-0 w-2.5 flex items-center justify-center cursor-col-resize rounded-r-xl z-10 opacity-0 group-hover/clip:opacity-100 focus-visible:opacity-100 transition-opacity bg-orange-400/80 hover:bg-orange-400 ${FOCUS_RING}`}
                               >
                                 <div className="w-0.5 h-4 bg-white/70 rounded-full" />
                               </div>
@@ -481,7 +551,8 @@ export const Timeline: React.FC<TimelineProps> = ({
                                 <button
                                   onClick={(e) => { e.stopPropagation(); onDeleteClip(clip.id); }}
                                   title="Remove clip"
-                                  className="absolute bottom-1.5 right-8 w-4 h-4 rounded-full flex items-center justify-center z-10 opacity-0 group-hover/clip:opacity-100 transition-all bg-red-400/80 hover:bg-red-500"
+                                  aria-label={`Remove clip: ${clip.name}`}
+                                  className={`absolute bottom-1.5 right-8 w-4 h-4 rounded-full flex items-center justify-center z-10 opacity-0 group-hover/clip:opacity-100 focus-visible:opacity-100 transition-all bg-red-400/80 hover:bg-red-500 ${FOCUS_RING}`}
                                 >
                                   <Trash2 className="w-2.5 h-2.5 text-white" />
                                 </button>
@@ -501,9 +572,12 @@ export const Timeline: React.FC<TimelineProps> = ({
                                     }
                                   }}
                                   title="Alternative clip suggestions"
+                                  aria-label="Alternative clip suggestions"
+                                  aria-expanded={altPopover?.clipId === clip.id}
                                   className={cn(
-                                    'absolute top-1.5 right-8 w-4 h-4 rounded-full flex items-center justify-center z-10 transition-all opacity-0 group-hover/clip:opacity-100',
-                                    altPopover?.clipId === clip.id ? 'opacity-100 bg-amber-400' : 'bg-amber-300 hover:bg-amber-400'
+                                    'absolute top-1.5 right-8 w-4 h-4 rounded-full flex items-center justify-center z-10 transition-all opacity-0 group-hover/clip:opacity-100 focus-visible:opacity-100',
+                                    altPopover?.clipId === clip.id ? 'opacity-100 bg-amber-400' : 'bg-amber-300 hover:bg-amber-400',
+                                    FOCUS_RING
                                   )}
                                 >
                                   <Star className="w-2.5 h-2.5 text-white fill-white" />
@@ -533,9 +607,12 @@ export const Timeline: React.FC<TimelineProps> = ({
                                       setAltPopover(null);
                                     }}
                                     title={`Transition: ${transitionType}`}
+                                    aria-label={`Edit transition into next clip (currently ${transitionType})`}
+                                    aria-expanded={transitionPopoverId === nextOnTrack.id}
                                     className={cn(
                                       'w-7 h-7 rounded-full border-2 flex items-center justify-center shadow-sm transition-all',
-                                      transitionType === 'cut' ? 'bg-white border-gray-300 hover:border-violet-400 text-gray-500' : 'bg-violet-600 border-violet-700 text-white hover:bg-violet-500'
+                                      transitionType === 'cut' ? 'bg-white border-gray-300 hover:border-violet-400 text-gray-500' : 'bg-violet-600 border-violet-700 text-white hover:bg-violet-500',
+                                      FOCUS_RING
                                     )}
                                   >
                                     {transitionType === 'cut' ? <Zap className="w-3 h-3" /> : <Layers className="w-3 h-3" />}
@@ -556,7 +633,7 @@ export const Timeline: React.FC<TimelineProps> = ({
       </div>
 
       {(transitionPopoverId || altPopover) && (
-        <div className="fixed inset-0 z-40" onClick={() => { setTransitionPopoverId(null); setTransitionPopoverPos(null); setAltPopover(null); }} />
+        <div aria-hidden="true" className="fixed inset-0 z-40" onClick={() => { setTransitionPopoverId(null); setTransitionPopoverPos(null); setAltPopover(null); }} />
       )}
 
       {/* Transition type picker — fixed position so it escapes the scroll container */}
@@ -574,7 +651,7 @@ export const Timeline: React.FC<TimelineProps> = ({
               <button
                 key={opt.value}
                 onClick={() => { handleTransitionChange(transitionPopoverId, opt.value); setTransitionPopoverPos(null); }}
-                className={cn('w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs font-medium transition-colors', (targetClip.transitionIn ?? 'cut') === opt.value ? 'bg-violet-50 text-violet-700' : 'text-gray-600 hover:bg-gray-50')}
+                className={cn('w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs font-medium transition-colors', (targetClip.transitionIn ?? 'cut') === opt.value ? 'bg-violet-50 text-violet-700' : 'text-gray-600 hover:bg-gray-50', FOCUS_RING)}
               >
                 <span>{opt.icon}</span>
                 {opt.label}
@@ -603,7 +680,7 @@ export const Timeline: React.FC<TimelineProps> = ({
                 <button
                   key={alt.id}
                   onClick={() => { onSwapClip(clip.id, alt.id); setAltPopover(null); }}
-                  className="w-full text-left px-2 py-2 rounded-lg hover:bg-violet-50 transition-colors group/alt"
+                  className="w-full text-left px-2 py-2 rounded-lg hover:bg-violet-50 transition-colors group/alt focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500"
                 >
                   <div className="flex items-center justify-between gap-1 mb-0.5">
                     <span className="text-xs font-semibold text-gray-700 truncate group-hover/alt:text-violet-700">{altClip.name}</span>
