@@ -71,4 +71,48 @@ test.describe('Syncro app smoke', () => {
     await page.keyboard.press('k');
     await expect(page.getByRole('button', { name: 'Play timeline' })).toBeVisible();
   });
+
+  test('onboarding asset list scrolls in the modal shell, not in an inner pane', async ({
+    page,
+  }) => {
+    await page.goto('/');
+
+    // Dismiss the forced API-key modal.
+    await page.getByPlaceholder('AIza…').fill('smoke-test-key');
+    await page.getByRole('button', { name: 'Save Key' }).click();
+    await expect(page.getByRole('heading', { name: 'Gemini API Key' })).toBeHidden();
+
+    // Enough clips that the old bounded inner list scrolled on its own,
+    // stacking a second scrollbar next to the page's.
+    const clips = [1, 2, 3, 4, 5, 6, 7, 8].map((i) => ({
+      name: `clip-${i}.mp4`,
+      mimeType: 'video/mp4',
+      buffer: Buffer.from(`clip-${i}`),
+    }));
+    const onboardingModal = page
+      .locator('div.fixed.inset-0')
+      .filter({ hasText: 'Upload your videos' });
+    await onboardingModal.locator('input[type="file"]').setInputFiles(clips);
+    await expect(onboardingModal.getByText('clip-8.mp4')).toBeVisible();
+
+    // The modal shell is the single scroll container: it is height-bounded
+    // and scrolls itself, while no inner pane may scroll (double scrollbar).
+    const shell = onboardingModal.locator('div.max-w-xl');
+    await expect(shell).toHaveCSS('overflow-y', 'auto');
+    const shellBox = await shell.evaluate((el) => ({
+      clientHeight: el.clientHeight,
+      viewport: window.innerHeight,
+    }));
+    expect(shellBox.clientHeight).toBeLessThanOrEqual(shellBox.viewport - 32);
+    const innerScrollers = await shell.evaluate((el) =>
+      [...el.querySelectorAll<HTMLElement>('*')].filter((d) => {
+        const cs = getComputedStyle(d);
+        return (
+          (cs.overflowY === 'auto' || cs.overflowY === 'scroll') &&
+          d.scrollHeight > d.clientHeight + 1
+        );
+      }).length,
+    );
+    expect(innerScrollers, 'inner pane added a second scrollbar').toBe(0);
+  });
 });
