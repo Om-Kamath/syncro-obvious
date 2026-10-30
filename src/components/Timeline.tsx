@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState, useCallback, useReducer } from 'rea
 import WaveSurfer from 'wavesurfer.js';
 import { VideoClip, Voiceover, TransitionType } from '../types';
 import { ClipWaveform } from './ClipWaveform';
-import { Play, Pause, Scissors, Wand2, Video, Plus, Minus, Maximize2, Zap, Layers, Star, Trash2, AlertTriangle, Keyboard } from 'lucide-react';
+import { Play, Pause, Scissors, Wand2, Video, Plus, Minus, Maximize2, Zap, Layers, Star, Trash2, AlertTriangle, Keyboard, Undo2, Redo2 } from 'lucide-react';
 import { DEFAULT_PPS, fitPixelsPerSecond, stepPixelsPerSecond } from '../utils/timelineZoom';
 import { findClipAtPlayhead, splitClipsAtPlayhead } from '../utils/clipSplit';
 import { selectionReducer, initialSelection, clipIdsInRect, type SelectionAction } from '../utils/selectionReducer';
@@ -26,6 +26,15 @@ export interface TimelineTransport {
   seekBy: (deltaSeconds: number) => void;
 }
 
+// A discrete or drag-gesture edit to the clip layout, emitted once per gesture
+// (not per mousemove) so one undo step reverts one user action.
+export interface ClipGesture {
+  kind: 'move' | 'trim' | 'transition' | 'split';
+  label: string;
+  before: VideoClip[];
+  after: VideoClip[];
+}
+
 interface TimelineProps {
   voiceover: Voiceover | null;
   videoClips: VideoClip[];
@@ -35,6 +44,11 @@ interface TimelineProps {
   onSwapClip?: (clipId: string, altId: string) => void;
   onDeleteClip?: (id: string) => void;
   onDeleteClips?: (ids: string[]) => void;
+  onClipGesture?: (gesture: ClipGesture) => void;
+  canUndo?: boolean;
+  canRedo?: boolean;
+  onUndo?: () => void;
+  onRedo?: () => void;
   isAligning: boolean;
   currentTime: number;
   onTimeUpdate: (time: number) => void;
@@ -97,6 +111,11 @@ export const Timeline: React.FC<TimelineProps> = ({
   onSwapClip,
   onDeleteClip,
   onDeleteClips,
+  onClipGesture,
+  canUndo,
+  canRedo,
+  onUndo,
+  onRedo,
   isAligning,
   currentTime,
   onTimeUpdate,
@@ -125,6 +144,14 @@ export const Timeline: React.FC<TimelineProps> = ({
   const marqueeRef = useRef<MarqueeState | null>(null);
   const marqueeMovedRef = useRef(false);
   const trimDragRef = useRef<TrimDragState | null>(null);
+  // Clip layout at gesture start — captured at mousedown, emitted as one
+  // command at gesture end (refs survive across the drag effect boundary).
+  const clipGestureRef = useRef<VideoClip[] | null>(null);
+  const emitClipGesture = (kind: ClipGesture['kind'], label: string, after: VideoClip[]) => {
+    const before = clipGestureRef.current;
+    clipGestureRef.current = null;
+    if (before) onClipGesture?.({ kind, label, before, after });
+  };
   const voiceoverDragRef = useRef<{ startMouseX: number; startClipTime: number } | null>(null);
   const videoClipsRef = useRef(videoClips);
   const voiceoverRef = useRef(voiceover);
@@ -166,15 +193,20 @@ export const Timeline: React.FC<TimelineProps> = ({
 
   // Blade the clip under the playhead. Refs keep the handler stable; the
   // right half mints its own blob URL so per-clip revoke-on-delete stays valid.
+  // Split emits a gesture like drags do, so undo restores the pre-split layout
+  // and the release policy can revoke the right half's URL once un-undoable.
   const handleSplitAtPlayhead = useCallback(() => {
+    const before = videoClipsRef.current;
     const next = splitClipsAtPlayhead(
-      videoClipsRef.current,
+      before,
       currentTimeRef.current,
       Math.random().toString(36).slice(2, 11),
       (clip) => URL.createObjectURL(clip.file),
     );
-    if (next) onVideoClipChange(next);
-  }, [onVideoClipChange]);
+    if (!next) return;
+    onVideoClipChange(next);
+    onClipGesture?.({ kind: 'split', label: 'Split clip', before, after: next });
+  }, [onVideoClipChange, onClipGesture]);
 
   const seekToTime = useCallback((time: number) => {
     const clamped = Math.max(0, Math.min(time, totalDuration));
@@ -315,7 +347,12 @@ export const Timeline: React.FC<TimelineProps> = ({
         return { ...c, startTime: Math.max(0, start.startTime + groupDeltaTime), track: Math.max(0, start.track + trackDelta) };
       }));
     };
-    const onUp = () => { clipDragRef.current = null; setDraggingClipId(null); onVideoClipChange(resolveOverlaps(videoClipsRef.current)); };
+    const onUp = () => {
+      clipDragRef.current = null; setDraggingClipId(null);
+      const after = resolveOverlaps(videoClipsRef.current);
+      onVideoClipChange(after);
+      emitClipGesture('move', 'Move clip', after);
+    };
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);
     return () => { window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); };
@@ -359,6 +396,7 @@ export const Timeline: React.FC<TimelineProps> = ({
 
   const handleTrimHandleMouseDown = (e: React.MouseEvent, clip: VideoClip, side: TrimSide) => {
     e.stopPropagation(); e.preventDefault();
+    clipGestureRef.current = videoClipsRef.current;
     trimDragRef.current = {
       id: clip.id, side, startMouseX: e.clientX,
       origTrimStart: clip.trimStart ?? 0,
@@ -388,7 +426,7 @@ export const Timeline: React.FC<TimelineProps> = ({
         }
       }));
     };
-    const onUp = () => { trimDragRef.current = null; setDraggingTrimId(null); };
+    const onUp = () => { trimDragRef.current = null; setDraggingTrimId(null); emitClipGesture('trim', 'Trim clip', videoClipsRef.current); };
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);
     return () => { window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); };
@@ -430,6 +468,9 @@ export const Timeline: React.FC<TimelineProps> = ({
   };
   const handleClipMouseDown = (e: React.MouseEvent, clip: VideoClip) => {
     e.stopPropagation(); e.preventDefault();
+    // Pre-drag layout baseline — the drag effect's mouseup emits one move
+    // gesture (covering the whole multi-selection) against this snapshot.
+    clipGestureRef.current = videoClipsRef.current;
     setTransitionPopoverId(null);
     let action: SelectionAction | null = null;
     if (e.shiftKey) {
@@ -464,9 +505,11 @@ export const Timeline: React.FC<TimelineProps> = ({
     else if (e.key === 'ArrowRight') delta = step;
     else return;
     e.preventDefault(); e.stopPropagation();
+    // React keyboard handler — render-scope clips are fresh; no ref needed.
+    const before = videoClips;
     const trimStart = clip.trimStart ?? 0;
     const trimmedDuration = clip.trimmedDuration ?? (clip.duration - trimStart);
-    onVideoClipChange(videoClipsRef.current.map((c: VideoClip) => {
+    const after = before.map((c: VideoClip) => {
       if (c.id !== clip.id) return c;
       if (side === 'right') {
         const next = Math.max(0.5, Math.min(trimmedDuration + delta, c.duration - trimStart));
@@ -475,7 +518,10 @@ export const Timeline: React.FC<TimelineProps> = ({
       const clamped = Math.max(0, Math.min(delta, trimmedDuration - 0.5));
       const newTrimStart = trimStart + clamped;
       return { ...c, trimStart: newTrimStart > 0 ? newTrimStart : undefined, startTime: Math.max(0, c.startTime + clamped), trimmedDuration: trimmedDuration - clamped };
-    }));
+    });
+    onVideoClipChange(after);
+    // Each keystroke is one discrete edit — one undo step per press.
+    onClipGesture?.({ kind: 'trim', label: 'Trim clip', before, after });
   };
   const handleVoiceoverMouseDown = (e: React.MouseEvent) => {
     e.stopPropagation(); e.preventDefault();
@@ -484,7 +530,11 @@ export const Timeline: React.FC<TimelineProps> = ({
     setIsDraggingVoiceover(true);
   };
   const handleTransitionChange = (clipId: string, type: TransitionType) => {
-    onVideoClipChange(videoClips.map(c => c.id === clipId ? { ...c, transitionIn: type } : c));
+    // React click handler — render-scope clips are fresh; no ref needed.
+    const before = videoClips;
+    const after = before.map(c => (c.id === clipId ? { ...c, transitionIn: type } : c));
+    onVideoClipChange(after);
+    onClipGesture?.({ kind: 'transition', label: 'Change transition', before, after });
     setTransitionPopoverId(null);
   };
 
@@ -513,6 +563,27 @@ export const Timeline: React.FC<TimelineProps> = ({
             {isPlaying ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
           </button>
           <span className="text-xs font-mono text-gray-400">{currentTime.toFixed(2)}s / {totalDuration.toFixed(2)}s</span>
+          <div className="w-px h-4 bg-gray-200" />
+          <div className="flex items-center gap-1">
+            <button
+              onClick={onUndo}
+              disabled={!canUndo}
+              title="Undo (Cmd+Z)"
+              aria-label="Undo last timeline edit"
+              className={`p-1.5 rounded-lg text-gray-500 bg-white border border-gray-200 hover:border-violet-300 hover:text-violet-600 transition-all disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:border-gray-200 disabled:hover:text-gray-500 ${FOCUS_RING}`}
+            >
+              <Undo2 className="w-3.5 h-3.5" />
+            </button>
+            <button
+              onClick={onRedo}
+              disabled={!canRedo}
+              title="Redo (Shift+Cmd+Z)"
+              aria-label="Redo timeline edit"
+              className={`p-1.5 rounded-lg text-gray-500 bg-white border border-gray-200 hover:border-violet-300 hover:text-violet-600 transition-all disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:border-gray-200 disabled:hover:text-gray-500 ${FOCUS_RING}`}
+            >
+              <Redo2 className="w-3.5 h-3.5" />
+            </button>
+          </div>
           <div className="w-px h-4 bg-gray-200" />
           <div className="flex items-center gap-1">
             <button
