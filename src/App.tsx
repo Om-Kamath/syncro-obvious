@@ -1,10 +1,12 @@
-
-import React, { Suspense, useState, useRef, useEffect } from 'react';
+import React, { Suspense, useState, useRef, useEffect, useCallback } from 'react';
 import { VideoClip, Voiceover, CaptionStyle, CaptionSegment, ThumbnailCandidate } from './types';
 import { FileUploader } from './components/FileUploader';
 import { MediaDropLayer, type ImportedMedia } from './components/MediaDropLayer';
 import { Toast, type ToastState } from './components/Toast';
 import { Timeline } from './components/Timeline';
+import type { TimelineTransport } from './components/Timeline';
+import { resolveShortcut, getShortcutContext } from './utils/keyboardShortcuts';
+import type { TimelineShortcutAction } from './utils/keyboardShortcuts';
 import { ClipEditor } from './components/ClipEditor';
 import { VoiceoverEditor } from './components/VoiceoverEditor';
 import { LogPanel } from './components/LogPanel';
@@ -290,6 +292,7 @@ export default function App() {
   const [toast, setToast] = useState<ToastState | null>(null);
   const [importedThumbnails, setImportedThumbnails] = useState<ThumbnailCandidate[]>([]);
   const videoRefs = useRef<Record<string, HTMLVideoElement>>({});
+  const transportRef = useRef<TimelineTransport | null>(null);
   const [previewHeight, setPreviewHeight] = useState(260);
   const isResizingPreview = useRef(false);
   const resizeStartY = useRef(0);
@@ -305,6 +308,37 @@ export default function App() {
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);
     return () => { window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); };
+  }, []);
+
+  const handleTransportReady = useCallback((transport: TimelineTransport | null) => {
+    transportRef.current = transport;
+  }, []);
+
+  // Global timeline shortcuts: the pure keymap decides, this routes actions
+  // into the Timeline's transport. Keys owned by a focused control (text
+  // fields, buttons, sliders — including the a11y behavior from PR #11) never
+  // reach here, so the two layers cannot collide.
+  useEffect(() => {
+    const applyAction = (action: TimelineShortcutAction) => {
+      const transport = transportRef.current;
+      if (action.type === 'toggle-play') transport?.togglePlay();
+      else if (action.type === 'pause') transport?.pause();
+      else transport?.seekBy(action.deltaSeconds);
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      const action = resolveShortcut(
+        { key: e.key, ctrlKey: e.ctrlKey, metaKey: e.metaKey, altKey: e.altKey },
+        getShortcutContext(e.target),
+      );
+      if (!action) return;
+      // Held Space/K must not machine-gun playback state; hold-to-scrub on
+      // seeks is intentional.
+      if (e.repeat && (action.type === 'toggle-play' || action.type === 'pause')) return;
+      e.preventDefault();
+      applyAction(action);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
   }, []);
 
   useEffect(() => {
@@ -797,6 +831,7 @@ export default function App() {
             isAligning={isAligning}
             currentTime={currentTime}
             onTimeUpdate={setCurrentTime}
+            onTransportReady={handleTransportReady}
           />
         </div>
       </main>

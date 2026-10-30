@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState, useCallback, useReducer } from 'rea
 import WaveSurfer from 'wavesurfer.js';
 import { VideoClip, Voiceover, TransitionType } from '../types';
 import { ClipWaveform } from './ClipWaveform';
-import { Play, Pause, Scissors, Wand2, Video, Plus, Minus, Maximize2, Zap, Layers, Star, Trash2 } from 'lucide-react';
+import { Play, Pause, Scissors, Wand2, Video, Plus, Minus, Maximize2, Zap, Layers, Star, Trash2, Keyboard } from 'lucide-react';
 import { DEFAULT_PPS, fitPixelsPerSecond, stepPixelsPerSecond } from '../utils/timelineZoom';
 import { findClipAtPlayhead, splitClipsAtPlayhead } from '../utils/clipSplit';
 import { selectionReducer, initialSelection, clipIdsInRect, type SelectionAction } from '../utils/selectionReducer';
@@ -16,6 +16,13 @@ function cn(...inputs: ClassValue[]) {
 // Shared visible focus indicator for every interactive timeline control.
 const FOCUS_RING = 'focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:ring-offset-1';
 
+/** Imperative playback controls App-level shortcuts drive; the clock stays in the Timeline. */
+export interface TimelineTransport {
+  togglePlay: () => void;
+  pause: () => void;
+  seekBy: (deltaSeconds: number) => void;
+}
+
 interface TimelineProps {
   voiceover: Voiceover | null;
   videoClips: VideoClip[];
@@ -28,6 +35,7 @@ interface TimelineProps {
   isAligning: boolean;
   currentTime: number;
   onTimeUpdate: (time: number) => void;
+  onTransportReady?: (transport: TimelineTransport | null) => void;
 }
 
 interface ClipDragState {
@@ -65,6 +73,14 @@ const TRANSITION_OPTIONS: { value: TransitionType; label: string; icon: string }
   { value: 'wipe',     label: 'Wipe',     icon: '➡️' },
 ];
 
+const SHORTCUT_HINTS: { keys: string[]; label: string }[] = [
+  { keys: ['Space'], label: 'Play / Pause' },
+  { keys: ['J'], label: 'Back 1s' },
+  { keys: ['K'], label: 'Pause' },
+  { keys: ['L'], label: 'Forward 1s' },
+  { keys: ['←', '→'], label: 'Frame step (1/30s)' },
+];
+
 const TRACK_H = 64;
 const TRACK_GAP = 16;
 const TRACK_ROW_H = TRACK_H + TRACK_GAP;
@@ -82,6 +98,7 @@ export const Timeline: React.FC<TimelineProps> = ({
   currentTime,
   onTimeUpdate,
   onVoiceoverChange,
+  onTransportReady,
 }) => {
   const waveformRef = useRef<HTMLDivElement>(null);
   const wavesurfer = useRef<WaveSurfer | null>(null);
@@ -98,6 +115,7 @@ export const Timeline: React.FC<TimelineProps> = ({
   const [altPopover, setAltPopover] = useState<{ clipId: string; x: number; y: number } | null>(null);
   const [selection, dispatchSelection] = useReducer(selectionReducer, initialSelection);
   const [marquee, setMarquee] = useState<MarqueeState | null>(null);
+  const [showShortcutsHelp, setShowShortcutsHelp] = useState(false);
 
   const clipDragRef = useRef<ClipDragState | null>(null);
   const selectionRef = useRef(selection);
@@ -358,6 +376,19 @@ export const Timeline: React.FC<TimelineProps> = ({
   }, [draggingTrimId]);
 
   const togglePlay = () => setIsPlaying(p => !p);
+
+  // Imperative transport handle: the clock, its clamping, and the wavesurfer
+  // sync stay here — App's global shortcuts just press the buttons.
+  useEffect(() => {
+    if (!onTransportReady) return;
+    onTransportReady({
+      togglePlay: () => setIsPlaying(p => !p),
+      pause: () => setIsPlaying(false),
+      seekBy: (deltaSeconds: number) => seekToTime(currentTimeRef.current + deltaSeconds),
+    });
+    return () => onTransportReady(null);
+  }, [onTransportReady, seekToTime]);
+
   const handleTrackClick = (e: React.MouseEvent) => {
     if ((e.target as HTMLElement).closest('[data-clip]')) return;
     // A marquee drag suppresses the click-to-seek that follows its mouseup.
@@ -511,14 +542,49 @@ export const Timeline: React.FC<TimelineProps> = ({
             </div>
           )}
         </div>
-        <button
-          onClick={onAutoAlign}
-          disabled={isAligning || !voiceover || videoClips.length === 0}
-          className={cn('flex items-center gap-2 px-4 py-2 rounded-xl font-medium text-sm transition-all bg-violet-500 text-white hover:bg-violet-400 disabled:opacity-50 disabled:cursor-not-allowed', isAligning && 'animate-pulse', FOCUS_RING)}
-        >
-          <Wand2 className="w-4 h-4" />
-          {isAligning ? 'Analyzing…' : 'Auto-Align with AI'}
-        </button>
+        <div className="flex items-center gap-2">
+          <div className="relative">
+            <button
+              onClick={() => setShowShortcutsHelp(v => !v)}
+              aria-label="Keyboard shortcuts"
+              aria-expanded={showShortcutsHelp}
+              className={`p-1.5 rounded-lg text-gray-500 bg-white border border-gray-200 hover:border-violet-300 hover:text-violet-600 transition-all ${FOCUS_RING}`}
+            >
+              <Keyboard className="w-3.5 h-3.5" />
+            </button>
+            {showShortcutsHelp && (
+              <>
+                <div aria-hidden="true" className="fixed inset-0 z-40" onClick={() => setShowShortcutsHelp(false)} />
+                <div role="note" aria-label="Keyboard shortcut cheat sheet" className="absolute right-0 top-full mt-2 z-50 w-72 rounded-xl border border-gray-200 bg-white p-3 shadow-lg">
+                  <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-2">Keyboard shortcuts</p>
+                  <dl className="text-xs text-gray-600 space-y-1.5">
+                    {SHORTCUT_HINTS.map((hint) => (
+                      <div key={hint.label} className="flex items-center justify-between gap-4">
+                        <dt className="flex items-center gap-1">
+                          {hint.keys.map((k) => (
+                            <kbd key={k} className="px-1.5 py-0.5 rounded border border-gray-200 bg-gray-50 font-mono text-[10px] text-gray-500">{k}</kbd>
+                          ))}
+                        </dt>
+                        <dd className="text-right">{hint.label}</dd>
+                      </div>
+                    ))}
+                  </dl>
+                  <p className="mt-2 pt-2 border-t border-gray-100 text-[10px] text-gray-400">
+                    Shortcuts stand down while a text field or timeline control has focus.
+                  </p>
+                </div>
+              </>
+            )}
+          </div>
+          <button
+            onClick={onAutoAlign}
+            disabled={isAligning || !voiceover || videoClips.length === 0}
+            className={cn('flex items-center gap-2 px-4 py-2 rounded-xl font-medium text-sm transition-all bg-violet-500 text-white hover:bg-violet-400 disabled:opacity-50 disabled:cursor-not-allowed', isAligning && 'animate-pulse', FOCUS_RING)}
+          >
+            <Wand2 className="w-4 h-4" />
+            {isAligning ? 'Analyzing…' : 'Auto-Align with AI'}
+          </button>
+        </div>
       </div>
 
       {/* Scrollable track area */}
