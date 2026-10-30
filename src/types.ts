@@ -66,11 +66,3 @@ export interface CaptionStyle {
   bgColor: string;
   position: 'bottom' | 'top';
 }
-
-export interface ThumbnailCandidate {
-  id: string;
-  timestamp: number;
-  quote: string;
-  reason: string;
-  imageDataUrl: string;
-}

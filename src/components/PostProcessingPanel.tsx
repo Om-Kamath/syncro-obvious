@@ -19,23 +19,24 @@ import {
   Hash,
   Film,
 } from 'lucide-react';
-import { VideoClip, Voiceover, CaptionStyle, CaptionMode, VideoDescription, ThumbnailCandidate, TitleVariant } from '../types';
+import { VideoClip, Voiceover, CaptionStyle, CaptionMode, VideoDescription, TitleVariant } from '../types';
 import { generateDescription, generateTitleVariants, identifyKeyMoments } from '../services/postProcessing';
 import { normalizeErrorMessage } from '../services/geminiClient';
 import { generateSRT, generateVTT, downloadTextFile } from '../utils/captionUtils';
-import { captureVideoFrame, addQuoteOverlay, downloadDataUrl, downloadFile, getClipAtTime } from '../utils/exportUtils';
+import { captureVideoFrame, downloadFile, getClipAtTime, formatTimestamp } from '../utils/exportUtils';
+import {
+  generateVariantSpecs,
+  applyThumbnailVariant,
+  DEFAULT_VARIANT_COUNT,
+  VARIANT_COUNT_OPTIONS,
+  type ThumbnailVariant,
+  type ThumbnailMomentVariants,
+} from '../utils/thumbnailVariants';
+import { ThumbnailCompareGrid } from './ThumbnailCompareGrid';
 import { EXPORT_PRESETS, DEFAULT_EXPORT_PRESET, computeDrawGeometry, type ExportPresetId } from '../utils/exportPresets';
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
-}
-
-function formatTimestamp(s: number): string {
-  const h = Math.floor(s / 3600);
-  const m = Math.floor((s % 3600) / 60);
-  const sec = Math.floor(s % 60);
-  if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
-  return `${m}:${String(sec).padStart(2, '0')}`;
 }
 
 // ── Tab button ──────────────────────────────────────────────────────────────
@@ -551,7 +552,8 @@ function CaptionsTab({
 // TAB 3 — Thumbnails
 // ═══════════════════════════════════════════════════════════════════════════
 export function ThumbnailsTab({ voiceover, videoClips }: { voiceover: Voiceover; videoClips: VideoClip[] }) {
-  const [thumbnails, setThumbnails] = useState<ThumbnailCandidate[]>([]);
+  const [moments, setMoments] = useState<ThumbnailMomentVariants[]>([]);
+  const [variantCount, setVariantCount] = useState(DEFAULT_VARIANT_COUNT);
   const [isGenerating, setIsGenerating] = useState(false);
   const [progress, setProgress] = useState('');
   const [error, setError] = useState('');
@@ -564,31 +566,42 @@ export function ThumbnailsTab({ voiceover, videoClips }: { voiceover: Voiceover;
     setIsGenerating(true);
     setError('');
     setProgress('Asking AI to identify key moments…');
-    setThumbnails([]);
+    setMoments([]);
     try {
-      const moments = await identifyKeyMoments(
+      const found = await identifyKeyMoments(
         voiceover.transcription,
         voiceover.segments,
         videoClips.map(c => c.analysis || '').filter(Boolean)
       );
+      const specs = generateVariantSpecs(variantCount);
 
-      const results: ThumbnailCandidate[] = [];
-      for (let i = 0; i < moments.length; i++) {
-        const m = moments[i];
-        setProgress(`Capturing frame ${i + 1} of ${moments.length}…`);
+      const results: ThumbnailMomentVariants[] = [];
+      for (let i = 0; i < found.length; i++) {
+        const m = found[i];
+        setProgress(
+          `Capturing frame ${i + 1} of ${found.length} and rendering ${specs.length} variants…`
+        );
         const hit = getClipAtTime(videoClips, m.timestamp);
         if (!hit) continue;
         try {
           const raw = await captureVideoFrame(hit.clip, hit.localTime);
-          const withText = await addQuoteOverlay(raw, m.quote);
+          const variants: ThumbnailVariant[] = [];
+          for (const spec of specs) {
+            try {
+              variants.push(await applyThumbnailVariant(raw, spec, m.quote));
+            } catch {
+              // skip this variant
+            }
+          }
+          if (variants.length === 0) continue;
           results.push({
             id: `thumb-${i}`,
             timestamp: m.timestamp,
             quote: m.quote,
             reason: m.reason,
-            imageDataUrl: withText,
+            variants,
           });
-          setThumbnails([...results]);
+          setMoments([...results]);
         } catch {
           // skip this frame
         }
@@ -616,28 +629,55 @@ export function ThumbnailsTab({ voiceover, videoClips }: { voiceover: Voiceover;
         <div>
           <p className="text-sm font-semibold text-gray-900">Thumbnail Candidates</p>
           <p className="text-xs text-violet-500 mt-0.5">
-            AI finds the most compelling moments and overlays a key quote
+            AI finds the most compelling moments and renders A/B variants to compare
           </p>
         </div>
-        <button
-          onClick={handleGenerate}
-          disabled={isGenerating}
-          className={cn(
-            'flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-xl transition-all',
-            isGenerating
-              ? 'bg-gray-100 text-gray-400 cursor-wait'
-              : 'bg-violet-600 text-white hover:bg-violet-700 shadow-sm shadow-violet-200'
-          )}
-        >
-          {isGenerating ? (
-            <Loader2 className="w-4 h-4 animate-spin" />
-          ) : thumbnails.length > 0 ? (
-            <RefreshCw className="w-4 h-4" />
-          ) : (
-            <Wand2 className="w-4 h-4" />
-          )}
-          {isGenerating ? 'Generating…' : thumbnails.length > 0 ? 'Regenerate' : 'Generate'}
-        </button>
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-1.5">
+            <span className="text-[10px] font-bold uppercase tracking-widest text-violet-400">
+              Variants
+            </span>
+            <div className="flex items-center gap-0.5 bg-gray-100 border border-gray-200 rounded-lg p-0.5">
+              {VARIANT_COUNT_OPTIONS.map(n => (
+                <button
+                  key={n}
+                  onClick={() => setVariantCount(n)}
+                  disabled={isGenerating}
+                  aria-pressed={variantCount === n}
+                  aria-label={`${n} variants per moment`}
+                  className={cn(
+                    'px-2 py-1 text-[11px] font-semibold rounded-md transition-all',
+                    variantCount === n
+                      ? 'bg-violet-600 text-white'
+                      : 'text-violet-500 hover:bg-violet-50',
+                    isGenerating && 'cursor-wait opacity-60'
+                  )}
+                >
+                  {n}
+                </button>
+              ))}
+            </div>
+          </div>
+          <button
+            onClick={handleGenerate}
+            disabled={isGenerating}
+            className={cn(
+              'flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-xl transition-all',
+              isGenerating
+                ? 'bg-gray-100 text-gray-400 cursor-wait'
+                : 'bg-violet-600 text-white hover:bg-violet-700 shadow-sm shadow-violet-200'
+            )}
+          >
+            {isGenerating ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : moments.length > 0 ? (
+              <RefreshCw className="w-4 h-4" />
+            ) : (
+              <Wand2 className="w-4 h-4" />
+            )}
+            {isGenerating ? 'Generating…' : moments.length > 0 ? 'Regenerate' : 'Generate'}
+          </button>
+        </div>
       </div>
 
       {isGenerating && progress && (
@@ -654,47 +694,9 @@ export function ThumbnailsTab({ voiceover, videoClips }: { voiceover: Voiceover;
       )}
 
       <AnimatePresence>
-        {thumbnails.length > 0 && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            className="grid grid-cols-2 gap-4"
-          >
-            {thumbnails.map((thumb, i) => (
-              <motion.div
-                key={thumb.id}
-                initial={{ opacity: 0, scale: 0.95 }}
-                animate={{ opacity: 1, scale: 1 }}
-                transition={{ delay: i * 0.05 }}
-                className="group rounded-2xl border border-gray-200 overflow-hidden bg-gray-50 hover:border-violet-400 hover:shadow-lg hover:shadow-violet-200/50 transition-all"
-              >
-                <div className="relative aspect-video bg-black/50">
-                  <img
-                    src={thumb.imageDataUrl}
-                    alt={thumb.quote}
-                    className="w-full h-full object-cover"
-                  />
-                  <div className="absolute top-2 left-2">
-                    <span className="px-2 py-0.5 bg-black/60 text-white text-[10px] font-mono rounded-md">
-                      {formatTimestamp(thumb.timestamp)}
-                    </span>
-                  </div>
-                </div>
-                <div className="p-3 space-y-2">
-                  <p className="text-xs font-semibold text-gray-900 line-clamp-1">"{thumb.quote}"</p>
-                  <p className="text-[10px] text-violet-500 line-clamp-2">{thumb.reason}</p>
-                  <button
-                    onClick={() =>
-                      downloadDataUrl(thumb.imageDataUrl, `thumbnail-${i + 1}-${thumb.timestamp}s.jpg`)
-                    }
-                    className="flex items-center gap-1.5 w-full justify-center py-1.5 text-xs font-semibold bg-gray-100 border border-gray-200 text-violet-400 rounded-lg hover:bg-violet-50 hover:text-violet-600 hover:border-violet-400 transition-all"
-                  >
-                    <Download className="w-3.5 h-3.5" />
-                    Download PNG
-                  </button>
-                </div>
-              </motion.div>
-            ))}
+        {moments.length > 0 && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
+            <ThumbnailCompareGrid moments={moments} />
           </motion.div>
         )}
       </AnimatePresence>

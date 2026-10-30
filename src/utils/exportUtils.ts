@@ -41,8 +41,13 @@ export function captureVideoFrame(clip: VideoClip, localTime: number): Promise<s
 /**
  * Takes a JPEG data URL, draws it onto a canvas, overlays a text quote,
  * and returns a new JPEG data URL. Rejects if the image is invalid.
+ * `position` chooses which edge the quote box hugs (default: bottom).
  */
-export function addQuoteOverlay(imageDataUrl: string, quote: string): Promise<string> {
+export function addQuoteOverlay(
+  imageDataUrl: string,
+  quote: string,
+  position: 'bottom' | 'top' = 'bottom'
+): Promise<string> {
   return new Promise((resolve, reject) => {
     const img = new Image();
 
@@ -75,7 +80,7 @@ export function addQuoteOverlay(imageDataUrl: string, quote: string): Promise<st
       const widths = lines.map(l => ctx.measureText(l).width);
       const boxW = Math.min(Math.max(...widths) + padX * 2, canvas.width - 60);
       const boxX = (canvas.width - boxW) / 2;
-      const boxY = canvas.height - boxH - 48;
+      const boxY = position === 'top' ? 48 : canvas.height - boxH - 48;
 
       ctx.fillStyle = 'rgba(0,0,0,0.72)';
       ctx.beginPath();
@@ -115,6 +120,15 @@ function wrapText(ctx: CanvasRenderingContext2D, text: string, maxWidth: number)
   }
   if (current) lines.push(current);
   return lines;
+}
+
+/** Format a timeline time as `m:ss` (or `h:mm:ss` past an hour) for UI badges. */
+export function formatTimestamp(s: number): string {
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = Math.floor(s % 60);
+  if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
+  return `${m}:${String(sec).padStart(2, '0')}`;
 }
 
 export function downloadDataUrl(dataUrl: string, filename: string): void {
