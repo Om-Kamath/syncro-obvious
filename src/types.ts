@@ -67,3 +67,31 @@ export interface ThumbnailCandidate {
   reason: string;
   imageDataUrl: string;
 }
+
+
+// --- Saved projects ---------------------------------------------------------
+// Metadata-only serialization of the editor state: everything JSON-safe.
+// Media bytes (File objects / blob URLs) are deliberately excluded — they need
+// a dedicated blob store (server or IndexedDB) and land with media-restore.
+
+export type SerializedVideoClip = Omit<VideoClip, 'file' | 'url'>;
+
+export type SerializedVoiceover = Omit<Voiceover, 'file' | 'url'>;
+
+export interface ProjectSnapshot {
+  clips: SerializedVideoClip[];
+  voiceover: SerializedVoiceover | null;
+  captionStyle: CaptionStyle;
+  captionsEnabled: boolean;
+}
+
+export interface SavedProjectSummary {
+  id: string;
+  name: string;
+  updatedAt: string; // ISO timestamp
+}
+
+export interface SavedProject extends SavedProjectSummary {
+  createdAt: string; // ISO timestamp
+  snapshot: ProjectSnapshot;
+}
