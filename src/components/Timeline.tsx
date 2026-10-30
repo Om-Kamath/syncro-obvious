@@ -3,7 +3,7 @@ import WaveSurfer from 'wavesurfer.js';
 import { VideoClip, Voiceover, TransitionType } from '../types';
 import { ClipWaveform } from './ClipWaveform';
 import { Play, Pause, Scissors, Wand2, Video, Plus, Minus, Maximize2, Zap, Layers, Star, Trash2, AlertTriangle, Keyboard } from 'lucide-react';
-import { DEFAULT_PPS, fitPixelsPerSecond, stepPixelsPerSecond } from '../utils/timelineZoom';
+import { DEFAULT_PPS, fitPixelsPerSecond, rulerLabelStep, stepPixelsPerSecond } from '../utils/timelineZoom';
 import { findClipAtPlayhead, splitClipsAtPlayhead } from '../utils/clipSplit';
 import { selectionReducer, initialSelection, clipIdsInRect, type SelectionAction } from '../utils/selectionReducer';
 import { collectSnapCandidates, findSnap } from '../utils/timelineSnap';
@@ -486,6 +486,9 @@ export const Timeline: React.FC<TimelineProps> = ({
     setTransitionPopoverId(null);
   };
 
+  // Thin the ruler labels out as ticks get dense (zoomed out) so they never collide.
+  const labelEverySeconds = rulerLabelStep(pixelsPerSecond);
+
   // Split is only offered strictly inside a clip — at a boundary it would be a no-op.
   const clipAtPlayhead = findClipAtPlayhead(videoClips, currentTime);
   const canSplitAtPlayhead = !!clipAtPlayhead && currentTime > clipAtPlayhead.startTime;
@@ -617,8 +620,10 @@ export const Timeline: React.FC<TimelineProps> = ({
           <div aria-hidden="true" style={{ marginLeft: TRACK_PADDING, height: 28, borderBottom: '1px solid #e5e7eb', position: 'relative' }} className="pointer-events-none">
             {Array.from({ length: Math.ceil(totalDuration) + 5 }).map((_, i) => (
               <div key={i} className="absolute bottom-0 flex flex-col items-start" style={{ left: `${i * pixelsPerSecond}px` }}>
-                <span className="text-[10px] text-gray-400 font-mono" style={{ position: 'absolute', top: 2, left: 3 }}>{i}s</span>
-                <div className="w-px bg-gray-300" style={{ height: 6 }} />
+                {i % labelEverySeconds === 0 && (
+                  <span className="text-[10px] text-gray-400 font-mono" style={{ position: 'absolute', top: 2, left: 3 }}>{i}s</span>
+                )}
+                <div className="w-px bg-gray-300" style={{ height: i % labelEverySeconds === 0 ? 10 : 6 }} />
               </div>
             ))}
           </div>
