@@ -37,20 +37,21 @@ interface MediaUploadResponse {
 }
 
 /**
- * Upload a blob, identifying it to the server via headers so the body stays
- * raw bytes (no multipart dependency). Filenames are percent-encoded because
- * HTTP header values must be latin-1 and clip names are user text.
+ * Upload a blob, identifying it via the `?filename=` query param so the body
+ * stays raw bytes (no multipart dependency). The server prefers the query
+ * param over the `x-filename` header, and Express decodes it — arbitrary
+ * unicode filenames round-trip exactly.
  */
 export async function uploadMediaBlob(
   blob: Blob,
   filename: string,
   mime: string = blob.type || 'application/octet-stream',
 ): Promise<MediaUploadResult> {
-  const res = await fetch('/api/media', {
+  const params = new URLSearchParams({ filename });
+  const res = await fetch(`/api/media?${params.toString()}`, {
     method: 'POST',
     headers: {
       'Content-Type': mime,
-      'x-syncro-filename': encodeURIComponent(filename),
     },
     body: blob,
   });

@@ -22,11 +22,11 @@ describe('uploadMediaBlob', () => {
 
     expect(result).toEqual({ id: 'media-1', size: 3 });
     const [url, init] = mockFetch.mock.calls[0] as [string, RequestInit];
-    expect(url).toBe('/api/media');
+    expect(url).toBe('/api/media?filename=my+clip.webm');
     expect(init.method).toBe('POST');
     const headers = init.headers as Record<string, string>;
     expect(headers['Content-Type']).toBe('video/webm');
-    expect(headers['x-syncro-filename']).toBe(encodeURIComponent('my clip.webm'));
+    expect(headers['x-filename']).toBeUndefined();
   });
 
   it('rejects an upload the server refused', async () => {

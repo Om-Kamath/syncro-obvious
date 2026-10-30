@@ -4,7 +4,6 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { AddressInfo } from 'node:net';
-import { MediaStore } from '../../server/media/media.store';
 import { createApp } from '../../server/app';
 import type { CaptionStyle, VideoClip, Voiceover } from '../types';
 import { MediaNotFoundError } from './mediaClient';
@@ -125,16 +124,16 @@ describe('projectPersistence media round-trip', () => {
 
   beforeAll(async () => {
     mediaRoot = await mkdtemp(path.join(os.tmpdir(), 'syncro-media-test-'));
-    const app = createApp({ mediaStore: new MediaStore(mediaRoot) });
+    const app = createApp({ media: { rootDir: mediaRoot } });
     server = app.listen(0);
     await once(server, 'listening');
     const port = (server.address() as AddressInfo).port;
 
     transport = {
       async uploadMedia(blob, filename, mime) {
-        const res = await fetch(`http://127.0.0.1:${port}/api/media`, {
+        const res = await fetch(`http://127.0.0.1:${port}/api/media?filename=${encodeURIComponent(filename)}`, {
           method: 'POST',
-          headers: { 'Content-Type': mime, 'x-syncro-filename': encodeURIComponent(filename) },
+          headers: { 'Content-Type': mime },
           body: blob,
         });
         if (!res.ok) throw new Error(`Media upload failed (${res.status})`);
@@ -214,8 +213,11 @@ describe('projectPersistence media round-trip', () => {
     const saved = await saveProject({ name: 'Lossy', clips, voiceover: null, captionStyle: defaultCaptionStyle(), captionsEnabled: false, transport, storage });
 
     const ghostMediaId = storage.getRecord(saved.record.id)!.project.clips[1].mediaId!;
-    await rm(path.join(mediaRoot, ghostMediaId), { recursive: true, force: true });
+    // Main's store layout: flat <id>.bin blob + <id>.json metadata sidecar.
+    await rm(path.join(mediaRoot, `${ghostMediaId}.bin`), { force: true });
+    await rm(path.join(mediaRoot, `${ghostMediaId}.json`), { force: true });
     const minted = fakeUrlMinter();
+
 
     const result = await restoreProject(saved.record.id, { transport, storage, createObjectUrl: minted.createObjectUrl });
 
@@ -259,7 +261,8 @@ describe('projectPersistence media round-trip', () => {
       storage,
     });
     const voiceoverMediaId = storage.getRecord(saved.record.id)!.project.voiceover!.mediaId!;
-    await rm(path.join(mediaRoot, voiceoverMediaId), { recursive: true, force: true });
+    await rm(path.join(mediaRoot, `${voiceoverMediaId}.bin`), { force: true });
+    await rm(path.join(mediaRoot, `${voiceoverMediaId}.json`), { force: true });
 
     const result = await restoreProject(saved.record.id, { transport, storage, createObjectUrl: fakeUrlMinter().createObjectUrl });
 
