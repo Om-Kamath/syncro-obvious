@@ -31,6 +31,7 @@ A narration-first video editor in the browser: import clips, generate narration 
 | `npm run lint:eslint` | ESLint only |
 | `npm run typecheck` | Type-check only (`tsc --noEmit`) |
 | `npm run test:e2e` | Playwright e2e suite (Chromium; starts the dev server on :3000) |
+| `npm run mcp` | Start the MCP server (stdio) for agent-driven generation |
 | `npm run clean` | Remove `dist/` |
 
 ## Media API
@@ -67,3 +68,22 @@ Branch protection on `main` should require only the `gate` check: adding,
 removing, or renaming a job then never needs a settings change. To list the
 individual checks as required too, mark `lint`, `typecheck`, `unit`, `e2e`, and
 `gate` all required.
+
+## MCP Server
+
+Syncro exposes its Gemini generation features as an MCP server, so agents can
+drive narration, TTS, and captions without the UI. Every call is logged with
+token counts and an estimated cost.
+
+```sh
+export GEMINI_API_KEY=your-key
+npm run mcp
+```
+
+Tools: `generate_narration` (script from clip analyses), `generate_tts`
+(script → WAV audio), `generate_captions` (audio → transcription with
+segment timings). Point any MCP client at the stdio transport:
+
+```json
+{ "command": "npx", "args": ["tsx", "server/mcp/index.ts"], "env": { "GEMINI_API_KEY": "<key>" } }
+```
