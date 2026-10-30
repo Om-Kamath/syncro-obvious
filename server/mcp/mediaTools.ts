@@ -74,7 +74,7 @@ export function createSyncroMcpServer(options: SyncroMcpOptions): McpServer {
     { name: 'syncro-mcp', version: '0.1.0' },
     {
       instructions:
-        'Tools for driving the Syncro video editor: list and read saved projects, upload media to the Syncro server, and attach uploaded media to saved projects as timeline clips or the voiceover. ' +
+        'Tools for driving the Syncro video editor: list and read saved projects, create, update, or delete saved projects, upload media to the Syncro server, and attach uploaded media to saved projects as timeline clips or the voiceover. ' +
         'Requires the Syncro server to be running (default http://localhost:3001).',
     },
   );

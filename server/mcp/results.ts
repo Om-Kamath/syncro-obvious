@@ -27,6 +27,13 @@ export function toErrorResult(error: unknown): CallToolResult {
   if (error instanceof SyncroApiError) {
     return errorResult(`Syncro API error (status ${error.status}): ${error.message}`);
   }
+  if (error instanceof TypeError) {
+    // fetch-level failure (connection refused, DNS, ...) — surface a recovery
+    // hint instead of the raw TypeError so the calling agent can act on it.
+    return errorResult(
+      `Syncro API unavailable: ${error.message}. Start the server with npm run server:start (or point SYNCRO_SERVER_URL at a running instance).`,
+    );
+  }
   // Unexpected failures still surface to the caller; the SDK wraps the thrown
   // error as an isError result so the MCP session survives the bug.
   throw error;
