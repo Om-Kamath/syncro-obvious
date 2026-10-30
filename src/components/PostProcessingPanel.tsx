@@ -30,6 +30,7 @@ import { captureVideoFrame, addQuoteOverlay, downloadDataUrl, downloadFile, getC
 import { EXPORT_PRESETS, DEFAULT_EXPORT_PRESET, computeDrawGeometry, type ExportPresetId } from '../utils/exportPresets';
 import { audioChannelsOf, mixAudio, sliceAudioWindow, toAudioBuffer } from '../utils/audioMix';
 import { MusicPanel, DEFAULT_MUSIC_VOLUME } from './MusicPanel';
+import { EXPORT_CODECS, DEFAULT_EXPORT_CODEC, selectMimeType, type ExportCodecId } from '../utils/exportCodecs';
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -743,6 +744,13 @@ function ExportTab({
   const [musicFile, setMusicFile] = useState<File | null>(null);
   const [musicVolume, setMusicVolume] = useState(DEFAULT_MUSIC_VOLUME);
   const [exportError, setExportError] = useState<string | null>(null);
+  const [codecId, setCodecId] = useState<ExportCodecId>(DEFAULT_EXPORT_CODEC);
+  // Probe MediaRecorder support on render — cheap (a handful of string checks)
+  // and always current, so the UI reflects what a recording would actually use.
+  const selected = selectMimeType(
+    codecId,
+    m => typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported(m)
+  );
   const stopRef = useRef<(() => void) | null>(null);
 
   const handleDownloadAsset = (url: string, name: string) => {
@@ -832,15 +840,13 @@ function ExportTab({
         ...dest.stream.getTracks(),
       ]);
 
-      const { mimeType, ext, label } = pickMimeType();
+      const { mimeType, ext } = selected;
       const recorder = new MediaRecorder(combined, { mimeType });
       const chunks: Blob[] = [];
       recorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
       recorder.onstop = () => {
         const blob = new Blob(chunks, { type: mimeType });
         downloadFile(blob, `syncvoice-export.${ext}`);
-        // suppress unused warning
-        void label;
         setIsExporting(false);
         setExportProgress(0);
         Object.values(renderVids).forEach(v => { v.pause(); v.remove(); });
@@ -1008,7 +1014,6 @@ function ExportTab({
                 <p className="text-xs text-violet-500 mt-0.5">
                   Records the aligned sequence with narration audio
                   {captionsEnabled ? ' and burned-in captions' : ''}.
-                  Saves as MP4 (H.264) when supported by your browser, otherwise WebM.
                 </p>
               </div>
             </div>
@@ -1055,6 +1060,39 @@ function ExportTab({
               </p>
             </div>
 
+            <div className="space-y-2">
+              <p className="text-xs font-semibold text-gray-900">Format</p>
+              <div className="grid grid-cols-2 gap-2">
+                {Object.values(EXPORT_CODECS).map(c => (
+                  <button
+                    key={c.id}
+                    onClick={() => setCodecId(c.id)}
+                    disabled={isExporting}
+                    className={cn(
+                      'flex flex-col items-center gap-0.5 px-2 py-2 rounded-xl border text-xs font-semibold transition-all disabled:opacity-50',
+                      codecId === c.id
+                        ? 'bg-violet-50 border-violet-400 text-violet-600'
+                        : 'bg-white border-gray-200 text-gray-600 hover:border-violet-300'
+                    )}
+                  >
+                    <span>{c.label}</span>
+                    <span className="text-[10px] font-normal text-gray-400 text-center leading-tight">
+                      {c.description}
+                    </span>
+                  </button>
+                ))}
+              </div>
+              <p className="text-[10px] text-gray-400">
+                Records as {selected.label} · {selected.mimeType}
+              </p>
+              {selected.codec !== codecId && (
+                <p className="text-[10px] text-amber-600">
+                  {EXPORT_CODECS[codecId].label} is not supported by this browser — recording{' '}
+                  {selected.label} instead.
+                </p>
+              )}
+            </div>
+
             {isExporting && (
               <div className="space-y-2">
                 <div className="flex justify-between text-xs font-medium text-violet-400">
@@ -1098,21 +1136,6 @@ function ExportTab({
       )}
     </div>
   );
-}
-
-// ── Pick the best available recording format ─────────────────────────────────
-function pickMimeType(): { mimeType: string; ext: string; label: string } {
-  const candidates = [
-    { mimeType: 'video/mp4;codecs=avc1', ext: 'mp4', label: 'MP4 · H.264' },
-    { mimeType: 'video/mp4;codecs=h264', ext: 'mp4', label: 'MP4 · H.264' },
-    { mimeType: 'video/mp4', ext: 'mp4', label: 'MP4' },
-    { mimeType: 'video/webm;codecs=vp9', ext: 'webm', label: 'WebM · VP9' },
-    { mimeType: 'video/webm', ext: 'webm', label: 'WebM' },
-  ];
-  for (const c of candidates) {
-    if (MediaRecorder.isTypeSupported(c.mimeType)) return c;
-  }
-  return { mimeType: 'video/webm', ext: 'webm', label: 'WebM' };
 }
 
 // ── Canvas caption renderer (used during video export recording) ────────────
