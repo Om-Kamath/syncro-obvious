@@ -38,8 +38,14 @@ export const ClipWaveform: React.FC<ClipWaveformProps> = ({
     const mount = mountRef.current;
     if (!mount) return;
     let disposed = false;
+    let instance: WaveSurfer | null = null;
+    const destroyInstance = () => {
+      const dead = instance;
+      instance = null;
+      dead?.destroy();
+    };
     try {
-      const instance = WaveSurfer.create({
+      instance = WaveSurfer.create({
         container: mount,
         url,
         interact: false,
@@ -52,8 +58,15 @@ export const ClipWaveform: React.FC<ClipWaveformProps> = ({
         barRadius: 3,
       });
       instance.on('ready', () => { if (!disposed) setWaveformState('ready'); });
-      instance.on('error', () => { if (!disposed) setWaveformState('failed'); });
-      return () => { disposed = true; instance.destroy(); };
+      instance.on('error', () => {
+        if (disposed) return;
+        setWaveformState('failed');
+        // A failed decode leaves a half-alive instance (hanging load
+        // promise, error-state media element) that interferes with
+        // sibling waveforms — tear it down immediately.
+        destroyInstance();
+      });
+      return () => { disposed = true; destroyInstance(); };
     } catch (error) {
       // Environments without Web Audio can never render a waveform; degrade
       // to a hidden underlay (the lane falls back to its plain look) instead
