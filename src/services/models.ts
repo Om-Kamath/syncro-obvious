@@ -18,3 +18,35 @@ export const MODELS = {
   /** Higher-capability text model for structured output (descriptions, key moments). */
   flash: 'gemini-3.8-flash',
 } as const;
+
+export type ModelKey = keyof typeof MODELS;
+export type ModelId = (typeof MODELS)[ModelKey];
+
+/**
+ * Per-feature model selection — the single mapping of app feature → registry
+ * key. Call sites resolve their model via `modelFor(<feature>)` and never
+ * reference a model id (or a registry key) directly.
+ */
+export const FEATURE_MODELS = {
+  /** TTS voiceover generation. */
+  tts: 'tts',
+  /** Narration script writing. */
+  narration: 'flashLite',
+  /** Voiceover transcription. */
+  transcription: 'flashLite',
+  /** Video clip content analysis. */
+  videoAnalysis: 'flashLite',
+  /** AI clip alignment suggestions. */
+  clipAlignment: 'flashLite',
+  /** Post-processing: description, chapters, hashtags. */
+  description: 'flash',
+  /** Post-processing: thumbnail key moments. */
+  thumbnails: 'flash',
+} as const satisfies Record<string, ModelKey>;
+
+export type FeatureKey = keyof typeof FEATURE_MODELS;
+
+/** Resolves the model id pinned for a feature. */
+export function modelFor(feature: FeatureKey): ModelId {
+  return MODELS[FEATURE_MODELS[feature]];
+}
