@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 const { generateContentMock } = vi.hoisted(() => ({ generateContentMock: vi.fn() }));
 
@@ -19,6 +19,9 @@ vi.mock('./apiKey', () => ({
 }));
 
 import { generateDescription, identifyKeyMoments, parseModelJson } from './postProcessing';
+import { subscribe } from './logger';
+import type { LogEntry } from './logger';
+import { MODELS } from './models';
 
 const noopTranscription = 'hello world';
 const noopSegments = [{ text: 'hello world', start: 0, end: 2 }];
@@ -86,5 +89,64 @@ describe('identifyKeyMoments', () => {
     await expect(
       identifyKeyMoments(noopTranscription, noopSegments, noopAnalyses)
     ).rejects.toThrow(/malformed JSON/i);
+  });
+});
+
+describe('logging', () => {
+  const collected: LogEntry[] = [];
+  let unsubscribe: () => void = () => {};
+
+  beforeEach(() => {
+    generateContentMock.mockReset();
+    collected.length = 0;
+    unsubscribe = subscribe(latest => {
+      collected.length = 0;
+      collected.push(...latest);
+    });
+  });
+
+  afterEach(() => unsubscribe());
+
+  it('emits a pending entry at call start and finishes it with duration on success', async () => {
+    let resolveCall!: (value: { text: string }) => void;
+    generateContentMock.mockImplementation(
+      () => new Promise(resolve => { resolveCall = resolve; })
+    );
+
+    const pending = generateDescription(noopTranscription, noopSegments, noopAnalyses);
+    // startLog fires synchronously before the first await inside the service.
+    expect(collected[0]).toMatchObject({
+      fn: 'Generate Description',
+      model: MODELS.flash,
+      status: 'pending',
+    });
+
+    resolveCall({ text: JSON.stringify({ summary: 's', chapters: [], hashtags: [] }) });
+    await pending;
+    expect(collected[0]).toMatchObject({
+      fn: 'Generate Description',
+      model: MODELS.flash,
+      status: 'success',
+    });
+    expect(typeof collected[0].durationMs).toBe('number');
+  });
+
+  it('marks the log entry as errored with the parse message when JSON is malformed', async () => {
+    generateContentMock.mockResolvedValue({ text: '{broken' });
+    await expect(
+      identifyKeyMoments(noopTranscription, noopSegments, noopAnalyses)
+    ).rejects.toThrow(/malformed JSON/i);
+    expect(collected[0]).toMatchObject({ fn: 'Identify Key Moments', status: 'error' });
+    expect(collected[0].error).toMatch(/malformed JSON/i);
+    expect(collected[0].durationMs).toBeDefined();
+  });
+
+  it('records the API failure on the log entry when the Gemini call rejects', async () => {
+    generateContentMock.mockRejectedValue(new Error('API error: quota exceeded'));
+    await expect(
+      generateDescription(noopTranscription, noopSegments, noopAnalyses)
+    ).rejects.toThrow('API error: quota exceeded');
+    expect(collected[0]).toMatchObject({ fn: 'Generate Description', status: 'error' });
+    expect(collected[0].error).toBe('API error: quota exceeded');
   });
 });
