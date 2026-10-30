@@ -8,6 +8,7 @@ import {
   listTemplates,
   saveTemplate,
   deleteTemplate,
+  loadTemplatesResult,
 } from './captionTemplates';
 import { CaptionStyle, CaptionTemplate } from '../types';
 
@@ -154,5 +155,20 @@ describe('storage wrappers', () => {
 
   it('listTemplates surfaces corrupted storage instead of silently emptying', () => {
     expect(() => listTemplates(fakeStorage({ syncro_caption_templates: '{oops' }))).toThrow('corrupted');
+  });
+
+  it('loadTemplatesResult returns templates on success', () => {
+    const storage = fakeStorage();
+    saveTemplate('Bold Pop', style, storage);
+    const result = loadTemplatesResult(storage);
+    expect(result.error).toBeNull();
+    expect(result.templates).toHaveLength(1);
+    expect(applyTemplate(result.templates[0])).toEqual(style);
+  });
+
+  it('loadTemplatesResult returns an empty list plus the error message on corruption', () => {
+    const result = loadTemplatesResult(fakeStorage({ syncro_caption_templates: '{oops' }));
+    expect(result.templates).toEqual([]);
+    expect(result.error).toMatch(/corrupted/);
   });
 });

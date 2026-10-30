@@ -109,6 +109,23 @@ export function listTemplates(storage: Storage = getStorage()): CaptionTemplate[
   return parsed.map(entry => validateTemplate(entry));
 }
 
+export interface TemplateLoadResult {
+  templates: CaptionTemplate[];
+  error: string | null;
+}
+
+/**
+ * Non-throwing load for render-time initialization (state initializers must not
+ * throw and effects must not setState). Corrupted storage surfaces as `error`.
+ */
+export function loadTemplatesResult(storage: Storage = getStorage()): TemplateLoadResult {
+  try {
+    return { templates: listTemplates(storage), error: null };
+  } catch (err) {
+    return { templates: [], error: err instanceof Error ? err.message : 'Failed to load templates' };
+  }
+}
+
 export function saveTemplate(name: string, style: CaptionStyle, storage: Storage = getStorage()): void {
   const templates = upsertTemplate(listTemplates(storage), name, style, generateTemplateId(), Date.now());
   storage.setItem(STORAGE_KEY, JSON.stringify(templates));

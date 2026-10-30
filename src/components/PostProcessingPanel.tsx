@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useState, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -23,7 +23,7 @@ import {
 import { VideoClip, Voiceover, CaptionStyle, CaptionMode, VideoDescription, ThumbnailCandidate } from '../types';
 import { generateDescription, identifyKeyMoments } from '../services/postProcessing';
 import { generateSRT, generateVTT, downloadTextFile } from '../utils/captionUtils';
-import { listTemplates, saveTemplate, deleteTemplate, applyTemplate } from '../services/captionTemplates';
+import { listTemplates, saveTemplate, deleteTemplate, applyTemplate, loadTemplatesResult } from '../services/captionTemplates';
 import type { CaptionTemplate } from '../types';
 import { captureVideoFrame, addQuoteOverlay, downloadDataUrl, downloadFile, getClipAtTime } from '../utils/exportUtils';
 import { EXPORT_PRESETS, DEFAULT_EXPORT_PRESET, computeDrawGeometry, type ExportPresetId } from '../utils/exportPresets';
@@ -307,17 +307,11 @@ function CaptionsTab({
   const handleMode = (mode: CaptionMode) => onStyleChange({ ...captionStyle, mode });
   const handlePosition = (position: 'bottom' | 'top') => onStyleChange({ ...captionStyle, position });
 
-  const [templates, setTemplates] = useState<CaptionTemplate[]>([]);
+  // Templates load once, at initialization — no effect, no setState-in-effect.
+  const [initialLoad] = useState(loadTemplatesResult);
+  const [templates, setTemplates] = useState<CaptionTemplate[]>(initialLoad.templates);
   const [templateName, setTemplateName] = useState('');
-  const [templateError, setTemplateError] = useState<string | null>(null);
-
-  useEffect(() => {
-    try {
-      setTemplates(listTemplates());
-    } catch (err) {
-      setTemplateError(err instanceof Error ? err.message : 'Failed to load templates');
-    }
-  }, []);
+  const [templateError, setTemplateError] = useState<string | null>(initialLoad.error);
 
   const handleSaveTemplate = () => {
     const name = templateName.trim();
