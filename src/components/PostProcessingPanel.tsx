@@ -13,7 +13,6 @@ import {
   Loader2,
   Lock,
   Music,
-  Video,
   RefreshCw,
   ChevronDown,
   ChevronUp,
@@ -22,8 +21,9 @@ import {
 } from 'lucide-react';
 import { VideoClip, Voiceover, CaptionStyle, CaptionMode, VideoDescription, ThumbnailCandidate } from '../types';
 import { generateDescription, identifyKeyMoments } from '../services/postProcessing';
-import { generateSRT, generateVTT, downloadTextFile, downloadBlob } from '../utils/captionUtils';
+import { generateSRT, generateVTT, downloadTextFile } from '../utils/captionUtils';
 import { captureVideoFrame, addQuoteOverlay, downloadDataUrl, downloadFile, getClipAtTime } from '../utils/exportUtils';
+import { EXPORT_PRESETS, DEFAULT_EXPORT_PRESET, computeDrawGeometry, type ExportPresetId } from '../utils/exportPresets';
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -136,7 +136,7 @@ function DescriptionTab({ voiceover, videoClips }: { voiceover: Voiceover; video
         videoClips.map(c => c.analysis || '').filter(Boolean)
       );
       setDescription(result);
-    } catch (e) {
+    } catch {
       setError('Failed to generate description. Please try again.');
     } finally {
       setIsGenerating(false);
@@ -509,7 +509,7 @@ function ThumbnailsTab({ voiceover, videoClips }: { voiceover: Voiceover; videoC
       }
 
       if (results.length === 0) setError('Could not capture any frames. Try aligning clips first.');
-    } catch (e) {
+    } catch {
       setError('Failed to identify key moments. Please try again.');
     } finally {
       setIsGenerating(false);
@@ -631,6 +631,8 @@ function ExportTab({
 }) {
   const [isExporting, setIsExporting] = useState(false);
   const [exportProgress, setExportProgress] = useState(0);
+  const [presetId, setPresetId] = useState<ExportPresetId>(DEFAULT_EXPORT_PRESET);
+  const preset = EXPORT_PRESETS[presetId];
   const stopRef = useRef<(() => void) | null>(null);
 
   const handleDownloadAsset = (url: string, name: string) => {
@@ -656,8 +658,8 @@ function ExportTab({
     setExportProgress(0);
 
     try {
-      const W = 1280;
-      const H = 720;
+      const W = preset.width;
+      const H = preset.height;
       const canvas = document.createElement('canvas');
       canvas.width = W;
       canvas.height = H;
@@ -715,8 +717,6 @@ function ExportTab({
       const audioTrimStart = voiceover.trimStart ?? 0;
       const duration = (voiceover.trimEnd ?? voiceover.duration) - audioTrimStart;
       const startWall = performance.now();
-      const sorted = [...videoClips].sort((a, b) => a.startTime - b.startTime);
-      const totalClipDur = sorted.reduce((s, c) => s + c.duration, 0);
 
       let rafId: number;
       const draw = () => {
@@ -740,7 +740,10 @@ function ExportTab({
             // Seek if drifted; play (muted) so frames decode
             if (Math.abs(v.currentTime - hit.localTime) > 0.2) v.currentTime = hit.localTime;
             if (v.paused) v.play().catch(() => {});
-            try { drawContained(ctx, v, W, H); } catch { /* skip */ }
+            try {
+              const g = computeDrawGeometry(preset, v.videoWidth, v.videoHeight);
+              ctx.drawImage(v, g.dx, g.dy, g.dWidth, g.dHeight);
+            } catch { /* skip */ }
           }
         }
 
@@ -766,9 +769,6 @@ function ExportTab({
       audioEl.currentTime = audioTrimStart;
       audioEl.play();
       rafId = requestAnimationFrame(draw);
-
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
-      void totalClipDur;
     } catch (e) {
       console.error('Export failed:', e);
       setIsExporting(false);
@@ -882,6 +882,34 @@ function ExportTab({
               </div>
             </div>
 
+            <div className="space-y-2">
+              <p className="text-xs font-semibold text-gray-900">Aspect Preset</p>
+              <div className="grid grid-cols-3 gap-2">
+                {Object.values(EXPORT_PRESETS).map(p => (
+                  <button
+                    key={p.id}
+                    onClick={() => setPresetId(p.id)}
+                    disabled={isExporting}
+                    className={cn(
+                      'flex flex-col items-center gap-0.5 px-2 py-2 rounded-xl border text-xs font-semibold transition-all disabled:opacity-50',
+                      presetId === p.id
+                        ? 'bg-violet-50 border-violet-400 text-violet-600'
+                        : 'bg-white border-gray-200 text-gray-600 hover:border-violet-300'
+                    )}
+                  >
+                    <span>{p.label}</span>
+                    <span className="text-[10px] font-normal text-gray-400 text-center leading-tight">
+                      {p.description}
+                    </span>
+                  </button>
+                ))}
+              </div>
+              <p className="text-[10px] text-gray-400">
+                Output: {preset.width}×{preset.height} ·{' '}
+                {preset.fit === 'cover' ? 'smart crop (center-crop to fill)' : 'letterbox (full frame)'}
+              </p>
+            </div>
+
             {isExporting && (
               <div className="space-y-2">
                 <div className="flex justify-between text-xs font-medium text-violet-400">
@@ -897,6 +925,7 @@ function ExportTab({
                 </div>
               </div>
             )}
+
 
             <div className="flex gap-3">
               {!isExporting ? (
@@ -939,22 +968,6 @@ function pickMimeType(): { mimeType: string; ext: string; label: string } {
     if (MediaRecorder.isTypeSupported(c.mimeType)) return c;
   }
   return { mimeType: 'video/webm', ext: 'webm', label: 'WebM' };
-}
-
-// ── Draw video frame onto canvas preserving aspect ratio (letterbox) ─────────
-function drawContained(
-  ctx: CanvasRenderingContext2D,
-  v: HTMLVideoElement,
-  W: number,
-  H: number
-) {
-  const vW = v.videoWidth;
-  const vH = v.videoHeight;
-  if (!vW || !vH) { ctx.drawImage(v, 0, 0, W, H); return; }
-  const scale = Math.min(W / vW, H / vH);
-  const dW = vW * scale;
-  const dH = vH * scale;
-  ctx.drawImage(v, (W - dW) / 2, (H - dH) / 2, dW, dH);
 }
 
 // ── Canvas caption renderer (used during video export recording) ────────────

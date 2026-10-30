@@ -1,6 +1,6 @@
 import React, { useCallback } from 'react';
 import { useDropzone } from 'react-dropzone';
-import { Upload, Video, Music, X } from 'lucide-react';
+import { Upload } from 'lucide-react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 
@@ -31,7 +31,7 @@ export const FileUploader: React.FC<FileUploaderProps> = ({
     onDrop,
     accept,
     multiple,
-  } as any);
+  });
 
   return (
     <div

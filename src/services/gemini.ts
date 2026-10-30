@@ -14,7 +14,7 @@ function getAI() {
 // -------------------------------------------------------------------
 const fileUriCache = new Map<string, string>();
 
-async function getFileUri(file: File, logContext?: string): Promise<string> {
+async function getFileUri(file: File): Promise<string> {
   const cacheKey = `${file.name}::${file.size}`;
   if (fileUriCache.has(cacheKey)) {
     console.debug(`[gemini] reusing cached URI for "${file.name}"`);
@@ -86,19 +86,19 @@ export async function generateAudioFromScript(
       model: MODEL,
       contents: [{ parts: [{ text: script }] }],
       config: {
-        responseModalities: ['AUDIO'] as any,
-        speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName } } } as any,
+        responseModalities: ['AUDIO'],
+        speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName } } },
       },
     });
 
-    const part = response.candidates?.[0]?.content?.parts?.[0] as any;
+    const part = response.candidates?.[0]?.content?.parts?.[0] as { inlineData?: { data?: string } } | undefined;
     if (!part?.inlineData?.data) throw new Error('No audio returned from TTS');
 
     const url = pcmBase64ToWavUrl(part.inlineData.data);
     const duration = await getAudioDuration(url);
     finishLog(log);
     return { url, duration, transcription: script };
-  } catch (err: any) {
+  } catch (err) {
     finishLog(log, err?.message ?? String(err));
     throw err;
   }
@@ -125,7 +125,7 @@ ${videoClips.map((c, i) => `Clip ${i + 1} (${c.duration.toFixed(1)}s) — "${c.n
     const script = scriptResponse.text?.trim() || 'No narration could be generated.';
     finishLog(log);
     return generateAudioFromScript(script, voiceName);
-  } catch (err: any) {
+  } catch (err) {
     finishLog(log, err?.message ?? String(err));
     throw err;
   }
@@ -186,7 +186,7 @@ export async function analyzeVoiceover(
     const segments = estimateSegments(transcription, totalDuration);
     finishLog(log);
     return { transcription, segments };
-  } catch (err: any) {
+  } catch (err) {
     finishLog(log, err?.message ?? String(err));
     throw err;
   }
@@ -211,7 +211,7 @@ export async function analyzeVideo(videoFile: File): Promise<string> {
     const result = response.text || 'No analysis available.';
     finishLog(log);
     return result;
-  } catch (err: any) {
+  } catch (err) {
     finishLog(log, err?.message ?? String(err));
     throw err;
   }
@@ -287,7 +287,7 @@ Return a JSON array with one object per position, each containing:
     const entries: AlignmentEntry[] = JSON.parse(response.text || '[]');
     finishLog(log);
     return entries;
-  } catch (err: any) {
+  } catch (err) {
     finishLog(log, err?.message ?? String(err));
     throw err;
   }

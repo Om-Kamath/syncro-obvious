@@ -18,7 +18,7 @@ export const LogPanel: React.FC<LogPanelProps> = ({ onClose }) => {
   useEffect(() => subscribe(setEntries), []);
 
   const toggle = (id: string) =>
-    setExpanded(prev => { const s = new Set(prev); s.has(id) ? s.delete(id) : s.add(id); return s; });
+    setExpanded(prev => { const s = new Set(prev); if (s.has(id)) s.delete(id); else s.add(id); return s; });
 
   return (
     <div className="fixed top-14 right-0 bottom-0 w-80 z-[90] bg-white border-l border-gray-200 shadow-2xl flex flex-col">
