@@ -53,7 +53,6 @@ export const VoiceoverEditor: React.FC<VoiceoverEditorProps> = ({ voiceover, onS
     };
 
     const handleSave = () => {
-        const hasEdits = trimStart > 0 || trimEnd < effectiveDuration;
         onSave({
             ...voiceover,
             trimStart: trimStart > 0 ? trimStart : undefined,

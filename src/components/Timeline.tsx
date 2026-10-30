@@ -191,6 +191,24 @@ export const Timeline: React.FC<TimelineProps> = ({
     return () => { window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); };
   }, [isDraggingVoiceover, onVoiceoverChange]);
 
+  // Pure overlap-resolution for clip layout — declared before the drag effect
+  // that consumes it (hoisted here so closures capture a stable definition).
+  const resolveOverlaps = (clips: VideoClip[]): VideoClip[] => {
+    const byTrack: Record<number, VideoClip[]> = {};
+    for (const c of clips) { const t = c.track ?? 0; if (!byTrack[t]) byTrack[t] = []; byTrack[t].push(c); }
+    const result: VideoClip[] = [];
+    for (const track of Object.values(byTrack)) {
+      const sorted = [...track].sort((a, b) => a.startTime - b.startTime);
+      result.push(...sorted.map((clip, i) => {
+        const eff = clip.trimmedDuration ?? (clip.duration - (clip.trimStart ?? 0));
+        const next = sorted[i + 1];
+        if (next && clip.startTime + eff > next.startTime) return { ...clip, trimmedDuration: Math.max(0, next.startTime - clip.startTime) };
+        return clip;
+      }));
+    }
+    return result;
+  };
+
   useEffect(() => {
     if (!draggingClipId) return;
     const onMove = (e: MouseEvent) => {
@@ -211,22 +229,6 @@ export const Timeline: React.FC<TimelineProps> = ({
     window.addEventListener('mouseup', onUp);
     return () => { window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); };
   }, [draggingClipId]);
-
-  const resolveOverlaps = (clips: VideoClip[]): VideoClip[] => {
-    const byTrack: Record<number, VideoClip[]> = {};
-    for (const c of clips) { const t = c.track ?? 0; if (!byTrack[t]) byTrack[t] = []; byTrack[t].push(c); }
-    const result: VideoClip[] = [];
-    for (const track of Object.values(byTrack)) {
-      const sorted = [...track].sort((a, b) => a.startTime - b.startTime);
-      result.push(...sorted.map((clip, i) => {
-        const eff = clip.trimmedDuration ?? (clip.duration - (clip.trimStart ?? 0));
-        const next = sorted[i + 1];
-        if (next && clip.startTime + eff > next.startTime) return { ...clip, trimmedDuration: Math.max(0, next.startTime - clip.startTime) };
-        return clip;
-      }));
-    }
-    return result;
-  };
 
   const handleTrimHandleMouseDown = (e: React.MouseEvent, clip: VideoClip, side: TrimSide) => {
     e.stopPropagation(); e.preventDefault();

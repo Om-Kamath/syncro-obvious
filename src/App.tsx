@@ -311,6 +311,9 @@ export default function App() {
       return currentTime >= clip.startTime && currentTime < end;
     });
     if (activeClip) {
+      // Playback-sync effect: mirroring the playhead into state each tick is
+      // intentional; restructuring to event-driven sync is out of scope here.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setActiveVideoId(activeClip.id);
       const video = videoRefs.current[activeClip.id];
       if (video) {

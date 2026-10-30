@@ -13,7 +13,6 @@ import {
   Loader2,
   Lock,
   Music,
-  Video,
   RefreshCw,
   ChevronDown,
   ChevronUp,
@@ -22,7 +21,7 @@ import {
 } from 'lucide-react';
 import { VideoClip, Voiceover, CaptionStyle, CaptionMode, VideoDescription, ThumbnailCandidate } from '../types';
 import { generateDescription, identifyKeyMoments } from '../services/postProcessing';
-import { generateSRT, generateVTT, downloadTextFile, downloadBlob } from '../utils/captionUtils';
+import { generateSRT, generateVTT, downloadTextFile } from '../utils/captionUtils';
 import { captureVideoFrame, addQuoteOverlay, downloadDataUrl, downloadFile, getClipAtTime } from '../utils/exportUtils';
 import { EXPORT_PRESETS, DEFAULT_EXPORT_PRESET, computeDrawGeometry, type ExportPresetId } from '../utils/exportPresets';
 
@@ -137,7 +136,7 @@ function DescriptionTab({ voiceover, videoClips }: { voiceover: Voiceover; video
         videoClips.map(c => c.analysis || '').filter(Boolean)
       );
       setDescription(result);
-    } catch (e) {
+    } catch {
       setError('Failed to generate description. Please try again.');
     } finally {
       setIsGenerating(false);
@@ -510,7 +509,7 @@ function ThumbnailsTab({ voiceover, videoClips }: { voiceover: Voiceover; videoC
       }
 
       if (results.length === 0) setError('Could not capture any frames. Try aligning clips first.');
-    } catch (e) {
+    } catch {
       setError('Failed to identify key moments. Please try again.');
     } finally {
       setIsGenerating(false);
@@ -718,8 +717,6 @@ function ExportTab({
       const audioTrimStart = voiceover.trimStart ?? 0;
       const duration = (voiceover.trimEnd ?? voiceover.duration) - audioTrimStart;
       const startWall = performance.now();
-      const sorted = [...videoClips].sort((a, b) => a.startTime - b.startTime);
-      const totalClipDur = sorted.reduce((s, c) => s + c.duration, 0);
 
       let rafId: number;
       const draw = () => {
@@ -772,9 +769,6 @@ function ExportTab({
       audioEl.currentTime = audioTrimStart;
       audioEl.play();
       rafId = requestAnimationFrame(draw);
-
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
-      void totalClipDur;
     } catch (e) {
       console.error('Export failed:', e);
       setIsExporting(false);
