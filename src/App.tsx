@@ -34,7 +34,7 @@ import {
   Key,
 } from 'lucide-react';
 import { setApiKey, hasApiKey } from './services/apiKey';
-import { chainClips } from './utils/chainClips';
+import { chainClips, rippleDeleteMany } from './utils/chainClips';
 import { resolveWordTimings, findActiveWordIndex } from './utils/wordTiming';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -441,9 +441,13 @@ export default function App() {
   };
 
   const removeVideos = (ids: string[]) => {
-    const idSet = new Set(ids);
-    videoClips.forEach(c => { if (idSet.has(c.id)) URL.revokeObjectURL(c.url); });
-    setVideoClips(videoClips.filter(c => !idSet.has(c.id)));
+    setVideoClips(prev => {
+      const idSet = new Set(ids);
+      prev.forEach(c => { if (idSet.has(c.id)) URL.revokeObjectURL(c.url); });
+      // Ripple delete: rechain the remaining clips so no gap is left behind,
+      // whether one clip or a multi-select batch was removed.
+      return rippleDeleteMany(prev, ids);
+    });
   };
   const removeVideo = (id: string) => removeVideos([id]);
 
