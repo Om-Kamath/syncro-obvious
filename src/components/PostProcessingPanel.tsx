@@ -67,6 +67,7 @@ function TabButton({
   return (
     <button
       onClick={locked ? undefined : onClick}
+      disabled={locked}
       className={cn(
         'flex items-center gap-2 px-4 py-3 text-xs font-semibold border-b-2 transition-all whitespace-nowrap',
         active

@@ -66,7 +66,11 @@ test.describe('a11y: axe-core checks', () => {
       await page.getByRole('button', { name: 'Export' }).click();
       const panel = page.locator('.fixed.inset-0');
       await expect(panel.getByText('Export & Post-Processing')).toBeVisible();
-      await panel.getByRole('button', { name: tab, exact: true }).click();
+      const tabButton = panel.getByRole('button', { name: tab, exact: true });
+      // Locked tabs are disabled (not clickable, not in the tab order), so
+      // their reachable state is the panel as-loaded — scan that instead of
+      // clicking a control that cannot activate.
+      if (await tabButton.isEnabled()) await tabButton.click();
 
       expectNoCriticalViolations(await scan(page));
     });
