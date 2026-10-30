@@ -1,5 +1,10 @@
 import type { CaptionSegment, WordTiming } from '../types';
 
+// Shared word-highlight tokens so the preview overlay and the export burn-in
+// render identical highlight styling from one source.
+export const WORD_HIGHLIGHT_COLOR = '#7c3aed';
+export const WORD_WEIGHT = { active: 700, inactive: 500 } as const;
+
 /**
  * Returns the word timings to render for a segment: the real per-word
  * timestamps when the transcriber supplied them, otherwise an even-split
