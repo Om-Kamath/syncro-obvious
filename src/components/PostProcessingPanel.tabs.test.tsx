@@ -71,7 +71,14 @@ describe('surfaced postProcessing errors', () => {
     identifyKeyMomentsMock.mockRejectedValue(
       new Error('Thumbnail key-moment identification: Gemini returned an empty response.')
     );
-    render(<ThumbnailsTab voiceover={voiceover} videoClips={[clip()]} />);
+    render(
+      <ThumbnailsTab
+        voiceover={voiceover}
+        videoClips={[clip()]}
+        selectedThumbnailId={null}
+        onThumbnailSelect={() => {}}
+      />
+    );
     fireEvent.click(screen.getByRole('button', { name: 'Generate' }));
     await waitFor(() =>
       expect(screen.getByText(/returned an empty response/)).toBeDefined()

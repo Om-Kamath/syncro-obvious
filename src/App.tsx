@@ -278,6 +278,10 @@ export default function App() {
   const [captionStyle, setCaptionStyle] = useState<CaptionStyle>({
     mode: 'lower-third', fontSize: 16, color: '#ffffff', bgColor: '#000000', position: 'bottom',
   });
+  // Project state: the chosen publish-thumbnail variant id. Lives here (not in
+  // the panel) so it survives panel close/reopen and serializes with saved
+  // projects once persistence lands.
+  const [selectedThumbnailId, setSelectedThumbnailId] = useState<string | null>(null);
   const [onboardingStep, setOnboardingStep] = useState<1 | 2 | null>(1);
   const [showExportModal, setShowExportModal] = useState(false);
   const [showLogs, setShowLogs] = useState(false);
@@ -799,6 +803,8 @@ export default function App() {
                     captionsEnabled={captionsEnabled}
                     onCaptionStyleChange={setCaptionStyle}
                     onCaptionsEnabledChange={setCaptionsEnabled}
+                    selectedThumbnailId={selectedThumbnailId}
+                    onThumbnailSelect={setSelectedThumbnailId}
                   />
                 </Suspense>
               </div>
