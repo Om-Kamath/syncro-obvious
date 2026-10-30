@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { render, screen, cleanup } from '@testing-library/react';
+import { render, screen, cleanup, fireEvent } from '@testing-library/react';
 import { ErrorBoundary } from './ErrorBoundary';
 
 function Boom({ message }: { message: string }): never {
@@ -11,6 +11,7 @@ describe('ErrorBoundary', () => {
   afterEach(() => {
     cleanup();
     vi.restoreAllMocks();
+    vi.unstubAllGlobals();
   });
 
   it('renders children when nothing throws', () => {
@@ -30,7 +31,21 @@ describe('ErrorBoundary', () => {
       </ErrorBoundary>
     );
     expect(screen.getByText('Something went wrong')).toBeDefined();
+    expect(screen.getByText('Syncro')).toBeDefined();
     expect(screen.getByText(/Render exploded/)).toBeDefined();
     expect(screen.getByRole('button', { name: 'Reload' })).toBeDefined();
+  });
+
+  it('reloads the page when the Reload action is clicked', () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const reload = vi.fn();
+    vi.stubGlobal('location', { reload });
+    render(
+      <ErrorBoundary>
+        <Boom message="Render exploded" />
+      </ErrorBoundary>
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Reload' }));
+    expect(reload).toHaveBeenCalledTimes(1);
   });
 });
