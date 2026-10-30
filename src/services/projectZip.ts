@@ -126,10 +126,6 @@ export async function importProjectZip(source: Blob): Promise<ImportedProject> {
   const manifest = parseManifest(safeJsonParse(strFromU8(manifestBytes)));
 
   const createdUrls: string[] = [];
-  const revokeOnError = (error: unknown): never => {
-    createdUrls.forEach(url => URL.revokeObjectURL(url));
-    throw error;
-  };
 
   try {
     const clips: VideoClip[] = [];
@@ -171,7 +167,8 @@ export async function importProjectZip(source: Blob): Promise<ImportedProject> {
       captionStyle: manifest.captionStyle,
     };
   } catch (error) {
-    revokeOnError(error);
+    createdUrls.forEach(url => URL.revokeObjectURL(url));
+    throw error;
   }
 }
 
