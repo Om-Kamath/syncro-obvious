@@ -15,7 +15,7 @@ vi.mock('../services/postProcessing', () => ({
   identifyKeyMoments: identifyKeyMomentsMock,
 }));
 
-import { DescriptionTab, ThumbnailsTab } from './PostProcessingPanel';
+import { CaptionColorSwatch, DescriptionTab, ThumbnailsTab } from './PostProcessingPanel';
 import type { VideoClip, Voiceover } from '../types';
 
 const voiceover: Voiceover = {
@@ -77,5 +77,34 @@ describe('surfaced postProcessing errors', () => {
       expect(screen.getByText(/returned an empty response/)).toBeDefined()
     );
     expect(screen.queryByText('Failed to identify key moments. Please try again.')).toBeNull();
+  });
+});
+
+describe('CaptionColorSwatch', () => {
+  afterEach(() => {
+    cleanup();
+  });
+
+  it('gives the color input an accessible name', () => {
+    render(<CaptionColorSwatch label="Text Color" value="#ffffff" onChange={vi.fn()} />);
+    expect(screen.getByLabelText('Text Color')).toBeDefined();
+  });
+
+  it('ships a tooltip that hover and focus reveal', () => {
+    render(<CaptionColorSwatch label="Background Color" value="#000000" onChange={vi.fn()} />);
+    const tooltip = screen.getByText('Background Color');
+    expect(tooltip.getAttribute('aria-hidden')).toBe('true');
+    // jsdom computes no stylesheet, so assert the mechanism: hidden by default,
+    // revealed by the group hover and focus-within states.
+    expect(tooltip.className).toContain('opacity-0');
+    expect(tooltip.className).toContain('group-hover:opacity-100');
+    expect(tooltip.className).toContain('group-focus-within:opacity-100');
+  });
+
+  it('dispatches the picked color', () => {
+    const onStyleChange = vi.fn();
+    render(<CaptionColorSwatch label="Text Color" value="#ffffff" onChange={onStyleChange} />);
+    fireEvent.change(screen.getByLabelText('Text Color'), { target: { value: '#123456' } });
+    expect(onStyleChange).toHaveBeenCalledWith('#123456');
   });
 });
