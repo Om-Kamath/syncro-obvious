@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { VideoClip } from '../types';
-import { X, Scissors, Type, RotateCcw } from 'lucide-react';
+import { X, Scissors, Type, RotateCcw, Volume2 } from 'lucide-react';
+import { FADE_SECONDS_INPUT_RE, parseFadeSeconds } from '../utils/gainEnvelope';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 
@@ -24,6 +25,9 @@ export const ClipEditor: React.FC<ClipEditorProps> = ({ clip, onSave, onClose })
             : clip.duration
     );
     const [textOverlay, setTextOverlay] = useState(clip.textOverlay ?? '');
+    // Raw strings so intermediate typing states like "0." survive controlled input.
+    const [fadeInInput, setFadeInInput] = useState(clip.fadeIn !== undefined ? String(clip.fadeIn) : '');
+    const [fadeOutInput, setFadeOutInput] = useState(clip.fadeOut !== undefined ? String(clip.fadeOut) : '');
 
     const videoRef = useRef<HTMLVideoElement>(null);
     const overlayRef = useRef<HTMLDivElement>(null);
@@ -55,6 +59,8 @@ export const ClipEditor: React.FC<ClipEditorProps> = ({ clip, onSave, onClose })
             trimStart: trimStart > 0 ? trimStart : undefined,
             trimmedDuration: hasRightTrim ? newEffectiveDuration : undefined,
             textOverlay: textOverlay.trim() || undefined,
+            fadeIn: parseFadeSeconds(fadeInInput),
+            fadeOut: parseFadeSeconds(fadeOutInput),
         });
         onClose();
     };
@@ -63,6 +69,8 @@ export const ClipEditor: React.FC<ClipEditorProps> = ({ clip, onSave, onClose })
         setTrimStart(0);
         setTrimEnd(clip.duration);
         setTextOverlay('');
+        setFadeInInput('');
+        setFadeOutInput('');
     };
 
     const formatTime = (s: number) => `${s.toFixed(2)}s`;
@@ -171,6 +179,49 @@ export const ClipEditor: React.FC<ClipEditorProps> = ({ clip, onSave, onClose })
                                 </div>
                             </label>
                         </div>
+                    </div>
+
+                    {/* Audio fades section */}
+                    <div className="space-y-3">
+                        <div className="flex items-center gap-2 text-xs font-bold text-zinc-400 uppercase tracking-wider">
+                            <Volume2 className="w-3.5 h-3.5" />
+                            Audio Fades
+                        </div>
+                        <div className="grid grid-cols-2 gap-3">
+                            <label className="space-y-1">
+                                <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Fade in (s)</span>
+                                <input
+                                    type="text"
+                                    inputMode="decimal"
+                                    placeholder="0"
+                                    value={fadeInInput}
+                                    onChange={e => { if (FADE_SECONDS_INPUT_RE.test(e.target.value)) setFadeInInput(e.target.value); }}
+                                    className={cn(
+                                        "w-full text-sm px-3 py-2.5 rounded-xl border border-zinc-200 bg-zinc-50",
+                                        "focus:outline-none focus:ring-2 focus:ring-emerald-500/30 focus:border-emerald-400",
+                                        "text-zinc-700"
+                                    )}
+                                />
+                            </label>
+                            <label className="space-y-1">
+                                <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Fade out (s)</span>
+                                <input
+                                    type="text"
+                                    inputMode="decimal"
+                                    placeholder="0"
+                                    value={fadeOutInput}
+                                    onChange={e => { if (FADE_SECONDS_INPUT_RE.test(e.target.value)) setFadeOutInput(e.target.value); }}
+                                    className={cn(
+                                        "w-full text-sm px-3 py-2.5 rounded-xl border border-zinc-200 bg-zinc-50",
+                                        "focus:outline-none focus:ring-2 focus:ring-emerald-500/30 focus:border-emerald-400",
+                                        "text-zinc-700"
+                                    )}
+                                />
+                            </label>
+                        </div>
+                        <p className="text-[10px] text-zinc-400">
+                            Linear gain ramps on the program audio (voiceover) across this clip's span — audible in playback and the exported video. 0 = no fade.
+                        </p>
                     </div>
 
                     {/* Text overlay section */}
