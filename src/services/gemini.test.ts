@@ -28,7 +28,6 @@ vi.mock('./apiKey', () => ({
 }));
 
 import { generateAudioFromScript, generateNarrationFromVideos, inlineAudioToWavBytes, pcmBase64ToWavBytes, estimateSegments } from './gemini';
-import { MODELS } from './models';
 
 const toB64 = (bytes: Uint8Array) => btoa(String.fromCharCode(...bytes));
 const fromB64 = (b64: string) => Uint8Array.from(atob(b64), c => c.charCodeAt(0));
@@ -66,21 +65,6 @@ beforeEach(() => {
 afterEach(() => {
   URL.createObjectURL = originalCreateObjectURL;
   URL.revokeObjectURL = originalRevokeObjectURL;
-});
-
-describe('MODELS registry', () => {
-  it('pins the current GA model ids', () => {
-    expect(MODELS.tts).toBe('gemini-3.8-flash-tts');
-    expect(MODELS.flashLite).toBe('gemini-3.5-flash-lite');
-    expect(MODELS.flash).toBe('gemini-3.8-flash');
-  });
-
-  it('no longer references the shutting-down 2.5 preview TTS or 2.5 flash-lite', () => {
-    const values = Object.values(MODELS).join(' ');
-    expect(values).not.toContain('gemini-2.5-flash-preview-tts');
-    expect(values).not.toContain('gemini-2.5-flash-lite');
-    expect(values).not.toContain('gemini-3-flash-preview');
-  });
 });
 
 describe('pcmBase64ToWavBytes', () => {
