@@ -17,6 +17,8 @@ export interface VideoClip {
   transitionIn?: TransitionType; // transition from the previous clip into this one
   alternatives?: Array<{ id: string; confidence: number; reason: string }>; // AI-suggested alternative clips for this position
   thumbnails?: string[];    // filmstrip JPEG data URLs sampled at import (timeline background)
+  mediaId?: string;      // /api/media id once this clip's bytes are persisted (project save)
+  mediaMissing?: boolean; // restore-time state: the saved blob could not be fetched; timeline shows a per-clip error
 }
 
 export interface Voiceover {
@@ -28,6 +30,7 @@ export interface Voiceover {
   transcription?: string;
   segments?: CaptionSegment[];
   startTime?: number;
+  mediaId?: string; // /api/media id once this voiceover's bytes are persisted (project save)
 }
 
 export interface AlignmentResult {
@@ -49,6 +52,8 @@ export interface VideoDescription {
 
 export type CaptionMode = 'lower-third' | 'word-highlight' | 'speaker-labeled';
 
+export type CaptionPresetName = 'minimal' | 'bold-pop' | 'karaoke' | 'classic';
+
 export interface WordTiming {
   word: string;
   start: number; // seconds, absolute on the voiceover timeline
@@ -68,6 +73,7 @@ export interface CaptionStyle {
   color: string;
   bgColor: string;
   position: 'bottom' | 'top';
+  preset?: CaptionPresetName; // named look this style came from; manual edits clear it
 }
 
 export interface CaptionTemplate {
