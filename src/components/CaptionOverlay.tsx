@@ -1,5 +1,5 @@
 import { CaptionSegment, CaptionStyle } from '../types';
-import { resolveWordTimings, findActiveWordIndex } from '../utils/wordTiming';
+import { resolveWordTimings, findActiveWordIndex, WORD_HIGHLIGHT_COLOR, WORD_WEIGHT } from '../utils/wordTiming';
 
 function cn(...classes: (string | boolean | undefined | null)[]): string {
   return classes.filter(Boolean).join(' ');
@@ -31,7 +31,7 @@ export function CaptionOverlay({
         <div className="px-4 py-2 rounded-xl flex flex-wrap gap-x-1.5 gap-y-1 justify-center max-w-2xl"
           style={{ backgroundColor: style.bgColor, fontSize: `${style.fontSize}px` }}>
           {words.map((w, i) => (
-            <span key={i} style={{ color: i === wordIdx ? '#7c3aed' : style.color, fontWeight: i === wordIdx ? 700 : 500, transition: 'color 0.1s' }}>{w.word}</span>
+            <span key={i} style={{ color: i === wordIdx ? WORD_HIGHLIGHT_COLOR : style.color, fontWeight: i === wordIdx ? WORD_WEIGHT.active : WORD_WEIGHT.inactive, transition: 'color 0.1s' }}>{w.word}</span>
           ))}
         </div>
       </div>
