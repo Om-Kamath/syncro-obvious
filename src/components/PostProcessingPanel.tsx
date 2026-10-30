@@ -502,7 +502,7 @@ export function CaptionsTab({
       </div>
 
       {/* Font size */}
-      <div className="space-y-2">
+      <div className="space-y-3">
         <div className="flex items-center justify-between">
           <p className="text-xs font-bold uppercase tracking-widest text-gray-400">Font Size</p>
           <span className="text-xs font-mono font-semibold text-gray-600">{captionStyle.fontSize}px</span>
@@ -513,13 +513,13 @@ export function CaptionsTab({
           max={36}
           value={captionStyle.fontSize}
           onChange={e => updateStyle({ fontSize: Number(e.target.value) })}
-          className="w-full h-1.5 bg-gray-200 rounded-full appearance-none cursor-pointer accent-violet-600"
+          className="block w-full h-1.5 bg-gray-200 rounded-full appearance-none cursor-pointer accent-violet-600"
         />
       </div>
 
       {/* Colors */}
       <div className="grid grid-cols-2 gap-4">
-        <div className="space-y-2">
+        <div className="space-y-3">
           <p className="text-xs font-bold uppercase tracking-widest text-gray-400">Text Color</p>
           <div className="flex items-center gap-3 p-2.5 bg-gray-50 border border-gray-100 rounded-xl">
             <input
@@ -531,7 +531,7 @@ export function CaptionsTab({
             <span className="text-xs font-mono text-gray-500">{captionStyle.color}</span>
           </div>
         </div>
-        <div className="space-y-2">
+        <div className="space-y-3">
           <p className="text-xs font-bold uppercase tracking-widest text-gray-400">Background</p>
           <div className="flex items-center gap-3 p-2.5 bg-gray-50 border border-gray-100 rounded-xl">
             <input
@@ -546,7 +546,7 @@ export function CaptionsTab({
       </div>
 
       {/* Position */}
-      <div className="space-y-2">
+      <div className="space-y-3">
         <p className="text-xs font-bold uppercase tracking-widest text-violet-500">Position</p>
         <div className="flex gap-3">
           {(['bottom', 'top'] as const).map(pos => (
@@ -567,7 +567,7 @@ export function CaptionsTab({
       </div>
 
       {/* Templates */}
-      <div className="space-y-2">
+      <div className="space-y-3">
         <p className="text-xs font-bold uppercase tracking-widest text-violet-500">Templates</p>
         <div className="flex gap-2">
           <input
