@@ -13,6 +13,7 @@ import { ClipEditor } from './components/ClipEditor';
 import { VoiceoverEditor } from './components/VoiceoverEditor';
 import { LogPanel } from './components/LogPanel';
 import { ToastContainer } from './components/ToastContainer';
+import { toast } from './services/toastStore';
 import {
   analyzeVoiceover,
   analyzeVideo,
@@ -377,6 +378,10 @@ export default function App() {
     replaceVoiceover({ file, url, duration });
   };
 
+  // Adapter for the ToastState-contract call sites (#119): the store
+  // controller is the canonical toast path since ToastContainer landed.
+  const showToast = (kind: 'success' | 'error', message: string) =>
+    kind === 'error' ? toast.error(message) : toast.success(message);
   const describeFiles = (files: File[]) => files.map(f => `"${f.name}"`).join(', ');
 
   const handleAppDropImport = ({ videos, audios, images }: ImportedMedia) => {
