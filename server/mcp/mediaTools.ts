@@ -2,16 +2,16 @@ import { randomUUID } from 'node:crypto';
 import { basename } from 'node:path';
 import { readFile, stat } from 'node:fs/promises';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
 import {
   SyncroApiClient,
-  SyncroApiError,
   guessMimeFromFilename,
   type MediaAsset,
   type SerializedClip,
   type SerializedVoiceover,
 } from './apiClient';
+import { registerProjectTools } from './projectTools';
+import { ToolFailure, errorResult, jsonResult, toErrorResult } from './results';
 
 export const DEFAULT_MAX_UPLOAD_BYTES = 100 * 1024 * 1024;
 
@@ -25,26 +25,6 @@ export function parseMaxUploadBytes(value: string | undefined): number | null {
   const parsed = Number(value);
   if (!Number.isInteger(parsed) || parsed <= 0) return null;
   return parsed;
-}
-
-/** Expected tool failure — rendered as an `isError` result, never a crash. */
-class ToolFailure extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'ToolFailure';
-  }
-}
-
-function textResult(text: string): CallToolResult {
-  return { content: [{ type: 'text', text }] };
-}
-
-function jsonResult(payload: Record<string, unknown>): CallToolResult {
-  return textResult(JSON.stringify(payload, null, 2));
-}
-
-function errorResult(message: string): CallToolResult {
-  return { isError: true, ...textResult(message) };
 }
 
 /** Strict base64: rejects whitespace-only input and malformed padding instead of silently decoding garbage. */
@@ -81,11 +61,11 @@ export interface SyncroMcpOptions {
 }
 
 /**
- * Build the Syncro MCP server with the media tools registered.
+ * Build the Syncro MCP server: read-only project tools (list_projects,
+ * get_project) plus the media tools (upload_media, attach_media).
  *
- * This is the first slice of the campaign's MCP workstream (PR 30 will add
- * the read-only project tools on the same server). Tests drive it through
- * an in-memory client, so no stdio or HTTP listener is involved.
+ * Tests drive it through an in-memory client, so no stdio or HTTP listener
+ * is involved.
  */
 export function createSyncroMcpServer(options: SyncroMcpOptions): McpServer {
   const { apiClient, maxUploadBytes } = options;
@@ -94,7 +74,7 @@ export function createSyncroMcpServer(options: SyncroMcpOptions): McpServer {
     { name: 'syncro-mcp', version: '0.1.0' },
     {
       instructions:
-        'Tools for driving the Syncro video editor: upload media to the Syncro server and attach uploaded media to saved projects as timeline clips or the voiceover. ' +
+        'Tools for driving the Syncro video editor: list and read saved projects, upload media to the Syncro server, and attach uploaded media to saved projects as timeline clips or the voiceover. ' +
         'Requires the Syncro server to be running (default http://localhost:3001).',
     },
   );
@@ -201,15 +181,7 @@ export function createSyncroMcpServer(options: SyncroMcpOptions): McpServer {
     },
   );
 
-  return server;
-}
+  registerProjectTools(server, apiClient);
 
-function toErrorResult(error: unknown): CallToolResult {
-  if (error instanceof ToolFailure) return errorResult(error.message);
-  if (error instanceof SyncroApiError) {
-    return errorResult(`Syncro API error (status ${error.status}): ${error.message}`);
-  }
-  // Unexpected failures still surface to the caller; the SDK wraps the thrown
-  // error as an isError result so the MCP session survives the bug.
-  throw error;
+  return server;
 }
