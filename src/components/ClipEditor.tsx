@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { VideoClip } from '../types';
-import { X, Scissors, Type, RotateCcw } from 'lucide-react';
+import { X, Scissors, Type, RotateCcw, Gauge } from 'lucide-react';
+import { CLIP_SPEED_STEP, DEFAULT_CLIP_SPEED, MAX_CLIP_SPEED, MIN_CLIP_SPEED, SPEED_PRESETS, clampClipSpeed, formatClipSpeed, getClipTimelineDuration } from '../utils/clipSpeed';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 
@@ -24,6 +25,11 @@ export const ClipEditor: React.FC<ClipEditorProps> = ({ clip, onSave, onClose })
             : clip.duration
     );
     const [textOverlay, setTextOverlay] = useState(clip.textOverlay ?? '');
+    const [speed, setSpeed] = useState(clampClipSpeed(clip.playbackRate ?? DEFAULT_CLIP_SPEED));
+
+    // Live timeline occupancy for the current trim window at the chosen speed.
+    const sourceWindow = trimEnd - trimStart;
+    const timelineDuration = getClipTimelineDuration({ duration: clip.duration, trimmedDuration: sourceWindow, playbackRate: speed });
 
     const videoRef = useRef<HTMLVideoElement>(null);
     const overlayRef = useRef<HTMLDivElement>(null);
@@ -54,6 +60,7 @@ export const ClipEditor: React.FC<ClipEditorProps> = ({ clip, onSave, onClose })
             ...clip,
             trimStart: trimStart > 0 ? trimStart : undefined,
             trimmedDuration: hasRightTrim ? newEffectiveDuration : undefined,
+            playbackRate: speed !== DEFAULT_CLIP_SPEED ? speed : undefined,
             textOverlay: textOverlay.trim() || undefined,
         });
         onClose();
@@ -62,6 +69,7 @@ export const ClipEditor: React.FC<ClipEditorProps> = ({ clip, onSave, onClose })
     const handleReset = () => {
         setTrimStart(0);
         setTrimEnd(clip.duration);
+        setSpeed(DEFAULT_CLIP_SPEED);
         setTextOverlay('');
     };
 
@@ -171,6 +179,46 @@ export const ClipEditor: React.FC<ClipEditorProps> = ({ clip, onSave, onClose })
                                 </div>
                             </label>
                         </div>
+                    </div>
+
+                    {/* Playback speed section */}
+                    <div className="space-y-3">
+                        <div className="flex items-center gap-2 text-xs font-bold text-zinc-400 uppercase tracking-wider">
+                            <Gauge className="w-3.5 h-3.5" />
+                            Playback Speed
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                            {SPEED_PRESETS.map(preset => (
+                                <button
+                                    key={preset}
+                                    onClick={() => setSpeed(clampClipSpeed(preset))}
+                                    className={cn(
+                                        "px-2.5 py-1 text-[11px] font-semibold rounded-lg border transition-colors",
+                                        speed === preset
+                                            ? "border-emerald-500 bg-emerald-50 text-emerald-700"
+                                            : "border-zinc-200 bg-white text-zinc-500 hover:border-emerald-300 hover:text-emerald-600"
+                                    )}
+                                >
+                                    {formatClipSpeed(preset)}
+                                </button>
+                            ))}
+                        </div>
+                        <div className="flex items-center gap-2">
+                            <input
+                                type="range"
+                                min={MIN_CLIP_SPEED}
+                                max={MAX_CLIP_SPEED}
+                                step={CLIP_SPEED_STEP}
+                                value={speed}
+                                onChange={e => setSpeed(clampClipSpeed(Number(e.target.value)))}
+                                aria-label="Playback speed"
+                                className="flex-1 accent-emerald-500"
+                            />
+                            <span className="text-[11px] font-mono text-zinc-600 w-12 text-right">{formatClipSpeed(speed)}</span>
+                        </div>
+                        <p className="text-[10px] text-zinc-400">
+                            {formatTime(sourceWindow)} of media plays in {formatTime(timelineDuration)} on the timeline.
+                        </p>
                     </div>
 
                     {/* Text overlay section */}

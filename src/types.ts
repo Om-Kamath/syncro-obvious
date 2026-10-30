@@ -15,6 +15,7 @@ export interface VideoClip {
   textOverlay?: string;     // optional caption shown in preview while clip is active
   track?: number;           // video track layer (0 = default, stacks vertically)
   transitionIn?: TransitionType; // transition from the previous clip into this one
+  playbackRate?: number;    // playback speed multiplier (0.25–4, default 1): timeline occupancy = source duration ÷ rate
   alternatives?: Array<{ id: string; confidence: number; reason: string }>; // AI-suggested alternative clips for this position
   thumbnails?: string[];    // filmstrip JPEG data URLs sampled at import (timeline background)
   mediaId?: string;      // /api/media id once this clip's bytes are persisted (project save)
