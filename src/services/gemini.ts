@@ -95,7 +95,7 @@ export async function generateAudioFromScript(
   const MODEL = MODELS.tts;
   const log = startLog('TTS Generate', MODEL, `voice=${voiceName} | "${script.slice(0, 80)}${script.length > 80 ? '…' : ''}"`);
   try {
-    const response = await getAI().models.generateContent({
+    const response = await generateContent({
       model: MODEL,
       contents: [{ parts: [{ text: script }] }],
       config: {
@@ -125,7 +125,7 @@ export async function generateNarrationFromVideos(
   const totalDuration = videoClips.reduce((s, c) => s + c.duration, 0);
   const log = startLog('Generate Narration Script', MODEL, `${videoClips.length} clips | total ${totalDuration.toFixed(1)}s`);
   try {
-    const scriptResponse = await getAI().models.generateContent({
+    const scriptResponse = await generateContent({
       model: MODEL,
       contents: `You are a documentary narrator. Based on these video clips, write a natural, engaging narration script.
 The total video duration is ${totalDuration.toFixed(1)} seconds — keep your script roughly the same length when spoken at a natural pace.
@@ -183,7 +183,7 @@ export async function analyzeVoiceover(
 
     // Ask only for transcription text — no timestamps, no schema, no JSON mode.
     // Timestamps are estimated locally (estimateSegments) at zero extra cost.
-    const response = await getAI().models.generateContent({
+    const response = await generateContent({
       model: MODEL,
       contents: {
         parts: [
@@ -209,7 +209,7 @@ export async function analyzeVideo(videoFile: File): Promise<string> {
   try {
     const fileUri = await getFileUri(videoFile);
 
-    const response = await getAI().models.generateContent({
+    const response = await generateContent({
       model: MODEL,
       contents: {
         parts: [
@@ -263,7 +263,7 @@ Return a JSON array with one object per position, each containing:
 - "id": the primary clip id for this position
 - "alternatives": array of { "id", "confidence" (0.0-1.0), "reason" (≤12 words) }`;
 
-    const response = await getAI().models.generateContent({
+    const response = await generateContent({
       model: MODEL,
       contents: prompt,
       config: {
