@@ -582,7 +582,7 @@ export default function App() {
       downloadBlob(blob, 'syncro-project.zip');
     } catch (err) {
       console.error('Project export failed:', err);
-      showToast('error', `Failed to export project: ${err instanceof Error ? err.message : String(err)}`);
+      toast.error(`Failed to export project: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       setIsExportingProject(false);
     }
@@ -603,7 +603,7 @@ export default function App() {
       setOnboardingStep(null);
     } catch (err) {
       console.error('Project import failed:', err);
-      showToast('error', err instanceof ProjectZipError ? err.message : `Failed to import project: ${err instanceof Error ? err.message : String(err)}`);
+      toast.error(err instanceof ProjectZipError ? err.message : `Failed to import project: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       setIsImportingProject(false);
     }
