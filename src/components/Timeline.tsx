@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState, useCallback, useReducer } from 'rea
 import WaveSurfer from 'wavesurfer.js';
 import { VideoClip, Voiceover, TransitionType } from '../types';
 import { ClipWaveform } from './ClipWaveform';
-import { Play, Pause, Scissors, Wand2, Video, Plus, Minus, Maximize2, Zap, Layers, Star, Trash2, AlertTriangle, Keyboard } from 'lucide-react';
+import { Play, Pause, Scissors, Wand2, Video, Plus, Minus, Maximize2, Zap, Layers, Star, Trash2, AlertTriangle, Keyboard, Sunrise, Droplets, ArrowRight, type LucideIcon } from 'lucide-react';
 import { DEFAULT_PPS, fitPixelsPerSecond, stepPixelsPerSecond } from '../utils/timelineZoom';
 import { findClipAtPlayhead, splitClipsAtPlayhead } from '../utils/clipSplit';
 import { selectionReducer, initialSelection, clipIdsInRect, type SelectionAction } from '../utils/selectionReducer';
@@ -69,11 +69,13 @@ interface MarqueeState {
   y: number;
 }
 
-const TRANSITION_OPTIONS: { value: TransitionType; label: string; icon: string }[] = [
-  { value: 'cut',      label: 'Cut',      icon: '✂️' },
-  { value: 'fade',     label: 'Fade',     icon: '🌅' },
-  { value: 'dissolve', label: 'Dissolve', icon: '💧' },
-  { value: 'wipe',     label: 'Wipe',     icon: '➡️' },
+// Icons come from the same lucide set as every other toolbar control — the
+// picker renders inline in a toolbar otherwise made of stroked lucide icons.
+const TRANSITION_OPTIONS: { value: TransitionType; label: string; icon: LucideIcon }[] = [
+  { value: 'cut',      label: 'Cut',      icon: Scissors },
+  { value: 'fade',     label: 'Fade',     icon: Sunrise },
+  { value: 'dissolve', label: 'Dissolve', icon: Droplets },
+  { value: 'wipe',     label: 'Wipe',     icon: ArrowRight },
 ];
 
 const SHORTCUT_HINTS: { keys: string[]; label: string }[] = [
@@ -943,7 +945,7 @@ export const Timeline: React.FC<TimelineProps> = ({
                 onClick={() => { handleTransitionChange(transitionPopoverId, opt.value); setTransitionPopoverPos(null); }}
                 className={cn('w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs font-medium transition-colors', (targetClip.transitionIn ?? 'cut') === opt.value ? 'bg-violet-50 text-violet-700' : 'text-gray-600 hover:bg-gray-50', FOCUS_RING)}
               >
-                <span>{opt.icon}</span>
+                <opt.icon className="w-3.5 h-3.5" />
                 {opt.label}
                 {(targetClip.transitionIn ?? 'cut') === opt.value && <span className="ml-auto w-1.5 h-1.5 rounded-full bg-violet-500" />}
               </button>
