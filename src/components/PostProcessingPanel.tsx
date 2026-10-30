@@ -23,7 +23,7 @@ import {
 import { VideoClip, Voiceover, CaptionStyle, CaptionMode, VideoDescription, ThumbnailCandidate } from '../types';
 import { generateDescription, identifyKeyMoments } from '../services/postProcessing';
 import { normalizeErrorMessage } from '../services/geminiClient';
-import { generateSRT, generateVTT, downloadTextFile } from '../utils/captionUtils';
+import { generateSRT, generateVTT, downloadTextFile, generateChaptersTxt, formatChapterTime } from '../utils/captionUtils';
 import { listTemplates, saveTemplate, deleteTemplate, applyTemplate, loadTemplatesResult } from '../services/captionTemplates';
 import type { CaptionTemplate } from '../types';
 import { captureVideoFrame, addQuoteOverlay, downloadDataUrl, downloadFile, getClipAtTime } from '../utils/exportUtils';
@@ -33,14 +33,6 @@ import { MusicPanel, DEFAULT_MUSIC_VOLUME } from './MusicPanel';
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
-}
-
-function formatTimestamp(s: number): string {
-  const h = Math.floor(s / 3600);
-  const m = Math.floor((s % 3600) / 60);
-  const sec = Math.floor(s % 60);
-  if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
-  return `${m}:${String(sec).padStart(2, '0')}`;
 }
 
 // ── Tab button ──────────────────────────────────────────────────────────────
@@ -151,6 +143,13 @@ export function DescriptionTab({ voiceover, videoClips }: { voiceover: Voiceover
     }
   };
 
+  const chaptersText = description ? generateChaptersTxt(description.chapters) : '';
+
+  const handleDownloadChapters = () => {
+    if (!description) return;
+    downloadTextFile(generateChaptersTxt(description.chapters), 'chapters.txt', 'text/plain');
+  };
+
   const fullDescriptionText = description
     ? [
         description.summary,
@@ -158,7 +157,7 @@ export function DescriptionTab({ voiceover, videoClips }: { voiceover: Voiceover
         '━━━━━━━━━━━━━━━━━━━━',
         'CHAPTERS',
         '━━━━━━━━━━━━━━━━━━━━',
-        ...description.chapters.map(c => `${formatTimestamp(c.time)} ${c.label}`),
+        generateChaptersTxt(description.chapters),
         '',
         description.hashtags.map(h => `#${h}`).join(' '),
       ].join('\n')
@@ -226,17 +225,23 @@ export function DescriptionTab({ voiceover, videoClips }: { voiceover: Voiceover
                 <span className="text-[10px] font-bold uppercase tracking-widest text-gray-400">
                   Chapters ({description.chapters.length})
                 </span>
-                <CopyButton
-                  text={description.chapters
-                    .map(c => `${formatTimestamp(c.time)} ${c.label}`)
-                    .join('\n')}
-                />
+                <div className="flex items-center gap-1.5">
+                  <button
+                    onClick={handleDownloadChapters}
+                    aria-label="Download chapters as YouTube-format txt"
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg transition-all bg-gray-100 text-gray-500 hover:bg-gray-200"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    .txt
+                  </button>
+                  <CopyButton text={chaptersText} />
+                </div>
               </div>
               <div className="space-y-1 mt-1">
                 {description.chapters.map((ch, i) => (
                   <div key={i} className="flex items-center gap-3 py-1">
                     <span className="font-mono text-xs font-bold text-violet-400 w-10 flex-shrink-0">
-                      {formatTimestamp(ch.time)}
+                      {formatChapterTime(ch.time)}
                     </span>
                     <span className="text-sm text-gray-700">{ch.label}</span>
                   </div>
@@ -696,7 +701,7 @@ export function ThumbnailsTab({ voiceover, videoClips }: { voiceover: Voiceover;
                   />
                   <div className="absolute top-2 left-2">
                     <span className="px-2 py-0.5 bg-black/60 text-white text-[10px] font-mono rounded-md">
-                      {formatTimestamp(thumb.timestamp)}
+                      {formatChapterTime(thumb.timestamp)}
                     </span>
                   </div>
                 </div>
