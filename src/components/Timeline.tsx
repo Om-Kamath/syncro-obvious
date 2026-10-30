@@ -1,10 +1,11 @@
-import React, { useEffect, useRef, useState, useCallback } from 'react';
+import React, { useEffect, useRef, useState, useCallback, useReducer } from 'react';
 import WaveSurfer from 'wavesurfer.js';
 import { VideoClip, Voiceover, TransitionType } from '../types';
 import { ClipWaveform } from './ClipWaveform';
 import { Play, Pause, Scissors, Wand2, Video, Plus, Minus, Maximize2, Zap, Layers, Star, Trash2 } from 'lucide-react';
 import { DEFAULT_PPS, fitPixelsPerSecond, stepPixelsPerSecond } from '../utils/timelineZoom';
 import { findClipAtPlayhead, splitClipsAtPlayhead } from '../utils/clipSplit';
+import { selectionReducer, initialSelection, clipIdsInRect, type SelectionAction } from '../utils/selectionReducer';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 
@@ -23,6 +24,7 @@ interface TimelineProps {
   onAutoAlign: () => void;
   onSwapClip?: (clipId: string, altId: string) => void;
   onDeleteClip?: (id: string) => void;
+  onDeleteClips?: (ids: string[]) => void;
   isAligning: boolean;
   currentTime: number;
   onTimeUpdate: (time: number) => void;
@@ -33,6 +35,8 @@ interface ClipDragState {
   startMouseX: number;
   startClipTime: number;
   startTrack: number;
+  /** Clips that move together with the dragged one — the whole multi-selection. */
+  group: Array<{ id: string; startTime: number; track: number }>;
 }
 
 type TrimSide = 'left' | 'right';
@@ -44,6 +48,14 @@ interface TrimDragState {
   origTrimmedDuration: number;
   origDuration: number;
   origStartTime: number;
+}
+
+/** Marquee rectangle in video-tracks container coordinates: press origin + current point. */
+interface MarqueeState {
+  originX: number;
+  originY: number;
+  x: number;
+  y: number;
 }
 
 const TRANSITION_OPTIONS: { value: TransitionType; label: string; icon: string }[] = [
@@ -65,6 +77,7 @@ export const Timeline: React.FC<TimelineProps> = ({
   onAutoAlign,
   onSwapClip,
   onDeleteClip,
+  onDeleteClips,
   isAligning,
   currentTime,
   onTimeUpdate,
@@ -83,9 +96,13 @@ export const Timeline: React.FC<TimelineProps> = ({
   const [transitionPopoverId, setTransitionPopoverId] = useState<string | null>(null);
   const [transitionPopoverPos, setTransitionPopoverPos] = useState<{ x: number; y: number } | null>(null);
   const [altPopover, setAltPopover] = useState<{ clipId: string; x: number; y: number } | null>(null);
-  const [selectedClipId, setSelectedClipId] = useState<string | null>(null);
+  const [selection, dispatchSelection] = useReducer(selectionReducer, initialSelection);
+  const [marquee, setMarquee] = useState<MarqueeState | null>(null);
 
   const clipDragRef = useRef<ClipDragState | null>(null);
+  const selectionRef = useRef(selection);
+  const marqueeRef = useRef<MarqueeState | null>(null);
+  const marqueeMovedRef = useRef(false);
   const trimDragRef = useRef<TrimDragState | null>(null);
   const voiceoverDragRef = useRef<{ startMouseX: number; startClipTime: number } | null>(null);
   const videoClipsRef = useRef(videoClips);
@@ -95,6 +112,7 @@ export const Timeline: React.FC<TimelineProps> = ({
   useEffect(() => { currentTimeRef.current = currentTime; }, [currentTime]);
   useEffect(() => { videoClipsRef.current = videoClips; }, [videoClips]);
   useEffect(() => { voiceoverRef.current = voiceover; }, [voiceover]);
+  useEffect(() => { selectionRef.current = selection; }, [selection]);
 
   const [pixelsPerSecond, setPixelsPerSecond] = useState<number>(DEFAULT_PPS);
   const TRACK_PADDING = TRACK_LABEL_W + 8; // label width + gap-2 (8px) = where lane content starts
@@ -111,6 +129,10 @@ export const Timeline: React.FC<TimelineProps> = ({
 
   const usedTracks = videoClips.length > 0 ? Math.max(...videoClips.map(c => c.track ?? 0)) + 1 : 1;
   const numTracks = Math.max(2, usedTracks, extraTracks + 1);
+
+  // Timeline order for shift-click range selection.
+  const sortedClips = [...videoClips].sort((a, b) => a.startTime - b.startTime);
+  const orderedClipIds = sortedClips.map((c) => c.id);
 
   const handleZoom = useCallback((direction: 1 | -1) => {
     setPixelsPerSecond(pps => stepPixelsPerSecond(pps, direction));
@@ -242,21 +264,65 @@ export const Timeline: React.FC<TimelineProps> = ({
     const onMove = (e: MouseEvent) => {
       const drag = clipDragRef.current;
       if (!drag) return;
-      const newStart = Math.max(0, drag.startClipTime + (e.clientX - drag.startMouseX) / pixelsPerSecond);
-      let targetTrack = drag.startTrack;
+      const deltaTime = (e.clientX - drag.startMouseX) / pixelsPerSecond;
+      let trackDelta = 0;
       if (videoTracksContainerRef.current) {
         const rect = videoTracksContainerRef.current.getBoundingClientRect();
         const relY = e.clientY - rect.top;
         const currentMax = Math.max(1, ...videoClipsRef.current.map(c => c.track ?? 0));
-        targetTrack = Math.max(0, Math.min(currentMax + 1, Math.floor(relY / TRACK_ROW_H)));
+        const targetTrack = Math.max(0, Math.min(currentMax + 1, Math.floor(relY / TRACK_ROW_H)));
+        trackDelta = targetTrack - drag.startTrack;
       }
-      onVideoClipChange(videoClipsRef.current.map(c => c.id === drag.id ? { ...c, startTime: newStart, track: targetTrack } : c));
+      // Move the whole drag group by the same time/track delta; the dragged
+      // clip's own startTime/track match the pre-group single-drag math.
+      const group = new Map(drag.group.map((g) => [g.id, g]));
+      onVideoClipChange(videoClipsRef.current.map(c => {
+        const start = group.get(c.id);
+        if (!start) return c;
+        return { ...c, startTime: Math.max(0, start.startTime + deltaTime), track: Math.max(0, start.track + trackDelta) };
+      }));
     };
     const onUp = () => { clipDragRef.current = null; setDraggingClipId(null); onVideoClipChange(resolveOverlaps(videoClipsRef.current)); };
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);
     return () => { window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); };
   }, [draggingClipId]);
+
+  // Marquee selection: track the pointer while pressed on empty track area and
+  // select every clip intersecting the drawn rectangle on release. Geometry
+  // lives in marqueeRef so the listeners survive per-move re-renders.
+  useEffect(() => {
+    if (!marquee) return;
+    const onMove = (e: MouseEvent) => {
+      const rect = videoTracksContainerRef.current?.getBoundingClientRect();
+      const start = marqueeRef.current;
+      if (!rect || !start) return;
+      marqueeMovedRef.current = true;
+      const next = { originX: start.originX, originY: start.originY, x: e.clientX - rect.left, y: e.clientY - rect.top };
+      marqueeRef.current = next;
+      setMarquee(next);
+    };
+    const onUp = () => {
+      const start = marqueeRef.current;
+      marqueeRef.current = null;
+      setMarquee(null);
+      if (!start || !marqueeMovedRef.current) return; // zero-move press = plain click
+      const boxes = videoClipsRef.current.map((c) => ({
+        id: c.id,
+        left: TRACK_PADDING + c.startTime * pixelsPerSecond,
+        top: (c.track ?? 0) * TRACK_ROW_H,
+        width: (c.trimmedDuration ?? c.duration) * pixelsPerSecond,
+        height: TRACK_H,
+      }));
+      dispatchSelection({
+        type: 'set',
+        ids: clipIdsInRect(boxes, { left: start.originX, top: start.originY, width: start.x - start.originX, height: start.y - start.originY }),
+      });
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    return () => { window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); };
+  }, [marquee, pixelsPerSecond, TRACK_PADDING]);
 
   const handleTrimHandleMouseDown = (e: React.MouseEvent, clip: VideoClip, side: TrimSide) => {
     e.stopPropagation(); e.preventDefault();
@@ -294,14 +360,51 @@ export const Timeline: React.FC<TimelineProps> = ({
   const togglePlay = () => setIsPlaying(p => !p);
   const handleTrackClick = (e: React.MouseEvent) => {
     if ((e.target as HTMLElement).closest('[data-clip]')) return;
+    // A marquee drag suppresses the click-to-seek that follows its mouseup.
+    if (marqueeMovedRef.current) { marqueeMovedRef.current = false; return; }
     seekToTime(getTimeFromX(getXFromMouseEvent(e)));
+  };
+  // Press on empty track area starts a marquee (clips stopPropagation on their
+  // own mousedown; buttons/sliders are excluded by the closest() guard).
+  const handleTracksMouseDown = (e: React.MouseEvent) => {
+    if (e.button !== 0) return;
+    if ((e.target as HTMLElement).closest('[data-clip], button, [role="slider"]')) return;
+    const rect = videoTracksContainerRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    marqueeMovedRef.current = false;
+    marqueeRef.current = { originX: x, originY: y, x, y };
+    dispatchSelection({ type: 'clear' });
+    setMarquee({ originX: x, originY: y, x, y });
   };
   const handleClipMouseDown = (e: React.MouseEvent, clip: VideoClip) => {
     e.stopPropagation(); e.preventDefault();
-    clipDragRef.current = { id: clip.id, startMouseX: e.clientX, startClipTime: clip.startTime, startTrack: clip.track ?? 0 };
-    setSelectedClipId(clip.id);
-    setDraggingClipId(clip.id);
     setTransitionPopoverId(null);
+    let action: SelectionAction | null = null;
+    if (e.shiftKey) {
+      action = { type: 'extend', id: clip.id, orderedIds: orderedClipIds };
+    } else if (e.ctrlKey || e.metaKey) {
+      action = { type: 'toggle', id: clip.id };
+    } else if (!selectionRef.current.ids.has(clip.id)) {
+      action = { type: 'select', id: clip.id };
+    }
+    // Group membership resolves from the selection *after* the click's
+    // modifier effect — dragging a selected clip moves the whole selection.
+    const nextSelection = action ? selectionReducer(selectionRef.current, action) : selectionRef.current;
+    if (action) dispatchSelection(action);
+    const groupIds = nextSelection.ids.has(clip.id) ? [...nextSelection.ids] : [clip.id];
+    const group = videoClipsRef.current
+      .filter((c) => groupIds.includes(c.id))
+      .map((c) => ({ id: c.id, startTime: c.startTime, track: c.track ?? 0 }));
+    clipDragRef.current = { id: clip.id, startMouseX: e.clientX, startClipTime: clip.startTime, startTrack: clip.track ?? 0, group };
+    setDraggingClipId(clip.id);
+  };
+  const deleteClipSelection = (clip: VideoClip) => {
+    if (!onDeleteClips) return;
+    const ids = selectionRef.current.ids.has(clip.id) ? [...selectionRef.current.ids] : [clip.id];
+    onDeleteClips(ids);
+    dispatchSelection({ type: 'clear' });
   };
   // Keyboard mirror of the mouse trim drag — same clamps, fixed step.
   const handleTrimKeyDown = (e: React.KeyboardEvent, clip: VideoClip, side: TrimSide) => {
@@ -334,8 +437,6 @@ export const Timeline: React.FC<TimelineProps> = ({
     onVideoClipChange(videoClips.map(c => c.id === clipId ? { ...c, transitionIn: type } : c));
     setTransitionPopoverId(null);
   };
-
-  const sortedClips = [...videoClips].sort((a, b) => a.startTime - b.startTime);
 
   // Split is only offered strictly inside a clip — at a boundary it would be a no-op.
   const clipAtPlayhead = findClipAtPlayhead(videoClips, currentTime);
@@ -394,6 +495,21 @@ export const Timeline: React.FC<TimelineProps> = ({
           >
             <Plus className="w-3.5 h-3.5" /> Add Track
           </button>
+          {selection.ids.size >= 2 && onDeleteClips && (
+            <div role="status" aria-label={`${selection.ids.size} clips selected`} className="flex items-center gap-1 pl-1">
+              <span className="text-xs font-medium text-violet-600 bg-violet-50 border border-violet-200 rounded-lg px-2 py-1.5">
+                {selection.ids.size} selected
+              </span>
+              <button
+                onClick={() => { onDeleteClips([...selection.ids]); dispatchSelection({ type: 'clear' }); }}
+                title="Delete selected clips"
+                aria-label={`Delete ${selection.ids.size} selected clips`}
+                className={`flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-medium text-red-500 bg-white border border-red-200 hover:bg-red-50 transition-all ${FOCUS_RING}`}
+              >
+                <Trash2 className="w-3.5 h-3.5" /> Delete
+              </button>
+            </div>
+          )}
         </div>
         <button
           onClick={onAutoAlign}
@@ -481,7 +597,7 @@ export const Timeline: React.FC<TimelineProps> = ({
             </div>
 
             {/* Video track rows */}
-            <div ref={videoTracksContainerRef} className="space-y-4">
+            <div ref={videoTracksContainerRef} onMouseDown={handleTracksMouseDown} className={cn('relative space-y-4', marquee && 'cursor-crosshair select-none')}>
               {Array.from({ length: numTracks }).map((_, trackIdx) => {
                 const trackClips = sortedClips.filter(c => (c.track ?? 0) === trackIdx);
                 return (
@@ -508,21 +624,24 @@ export const Timeline: React.FC<TimelineProps> = ({
                               role="button"
                               tabIndex={0}
                               aria-label={`Clip: ${clip.name}, ${effectiveDuration.toFixed(1)} seconds`}
-                              aria-pressed={selectedClipId === clip.id}
+                              aria-pressed={selection.ids.has(clip.id)}
                               onMouseDown={(e) => handleClipMouseDown(e, clip)}
                               onKeyDown={(e) => {
                                 if (e.key === 'Enter' || e.key === ' ') {
                                   e.preventDefault();
-                                  setSelectedClipId((id) => (id === clip.id ? null : clip.id));
+                                  dispatchSelection({ type: 'toggle', id: clip.id });
                                 } else if (e.key === 'Escape') {
-                                  setSelectedClipId(null);
+                                  dispatchSelection({ type: 'clear' });
+                                } else if (e.key === 'Delete' || e.key === 'Backspace') {
+                                  e.preventDefault();
+                                  deleteClipSelection(clip);
                                 }
                               }}
                               className={cn(
                                 'absolute h-full rounded-xl border flex flex-col justify-center px-3 select-none group/clip cursor-grab active:cursor-grabbing',
                                 isActive ? 'bg-violet-600 border-violet-700 ring-2 ring-violet-300/50 shadow-md' : 'bg-violet-100 border-violet-300 shadow-sm hover:shadow-md hover:border-violet-400',
                                 (isDragging || isTrimDragging) && 'shadow-xl ring-2 ring-violet-400/40 opacity-90',
-                                selectedClipId === clip.id && 'ring-2 ring-offset-2 ring-violet-600',
+                                selection.ids.has(clip.id) && 'ring-2 ring-offset-2 ring-violet-600',
                                 FOCUS_RING
                               )}
                               style={{ left: `${clip.startTime * pixelsPerSecond}px`, width: `${effectiveDuration * pixelsPerSecond}px`, zIndex: isDragging ? 100 : 2 }}
@@ -668,6 +787,20 @@ export const Timeline: React.FC<TimelineProps> = ({
                   </div>
                 );
               })}
+
+              {/* Marquee selection rectangle */}
+              {marquee && (
+                <div
+                  aria-hidden="true"
+                  className="absolute z-30 rounded-sm border border-violet-500 bg-violet-500/10 pointer-events-none"
+                  style={{
+                    left: Math.min(marquee.originX, marquee.x),
+                    top: Math.min(marquee.originY, marquee.y),
+                    width: Math.abs(marquee.x - marquee.originX),
+                    height: Math.abs(marquee.y - marquee.originY),
+                  }}
+                />
+              )}
             </div>
           </div>
         </div>
