@@ -11,7 +11,13 @@ import {
   type SerializedVoiceover,
 } from './apiClient';
 import { registerProjectTools } from './projectTools';
-import { ToolFailure, errorResult, jsonResult, toErrorResult } from './results';
+import { ToolFailure, errorResult, jsonResult, textResult, toErrorResult } from './results';
+import {
+  GET_TIMELINE_TOOL_DESCRIPTION,
+  GET_TIMELINE_TOOL_NAME,
+  handleGetTimeline,
+} from '../../src/mcp/getTimelineTool';
+import type { ProjectStore } from '../../src/mcp/projectStore';
 
 export const DEFAULT_MAX_UPLOAD_BYTES = 100 * 1024 * 1024;
 
@@ -58,6 +64,12 @@ function timelineEnd(clips: SerializedClip[]): number {
 export interface SyncroMcpOptions {
   apiClient: SyncroApiClient;
   maxUploadBytes: number;
+  /**
+   * Read store for the read-only `get_timeline` tool. The SQLite-backed
+   * store lands with the saved-projects API; until then callers pass an
+   * `InMemoryProjectStore` (tests, local runs) or omit it to skip the tool.
+   */
+  projectStore?: ProjectStore;
 }
 
 /**
@@ -182,6 +194,27 @@ export function createSyncroMcpServer(options: SyncroMcpOptions): McpServer {
   );
 
   registerProjectTools(server, apiClient);
+
+  if (options.projectStore) {
+    const projectStore = options.projectStore;
+    server.registerTool(
+      GET_TIMELINE_TOOL_NAME,
+      {
+        title: 'Get timeline',
+        description: GET_TIMELINE_TOOL_DESCRIPTION,
+        inputSchema: {
+          projectId: z.string().min(1).describe('Id of the saved project to inspect.'),
+        },
+      },
+      async (args) => {
+        const result = await handleGetTimeline(projectStore, args);
+        // Literal-equality narrowing: the project compiles without `strict`, and
+        // non-strict tsc does not narrow discriminated unions through `!result.ok`.
+        if (result.ok === false) return errorResult(result.error);
+        return textResult(JSON.stringify(result.timeline, null, 2));
+      },
+    );
+  }
 
   return server;
 }
