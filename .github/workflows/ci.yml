@@ -7,10 +7,32 @@ on:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
+  # Fail fast: a new push to the same ref cancels the superseded run instead
+  # of letting it finish in the background.
   cancel-in-progress: true
 
+# ---------------------------------------------------------------------------
+# Jobs and required checks
+#
+# Four independent gates run in parallel — no `needs` chain between them, so
+# a failure in one is visible immediately rather than after its predecessors:
+#
+#   lint        ESLint over the repo
+#   typecheck   tsc --noEmit
+#   unit        Vitest suite under v8 coverage + production build
+#   e2e         Playwright smoke suite (Chromium, axe-core a11y checks)
+#
+# `gate` is the aggregate check: it succeeds only when all four succeed, and
+# it fails (never skips) if any of them fails, is cancelled, or is skipped.
+#
+# Branch protection on `main` should require only `gate`: adding, removing,
+# or renaming a job then never needs a settings change, and no PR can merge
+# around a broken or skipped job. To require the individual checks as well,
+# mark `lint`, `typecheck`, `unit`, `e2e`, and `gate` all required.
+# ---------------------------------------------------------------------------
+
 jobs:
-  ci:
+  lint:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -24,9 +46,41 @@ jobs:
         run: npm ci
 
       - name: Lint
-        run: npm run lint
+        run: npm run lint:eslint
 
-      - name: Test with coverage
+  typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Coverage plumbing from #53: run the suite under the v8 provider and
+      # upload the report (including coverage-summary.json) on every run.
+      # No thresholds enforced yet — this is the measurement floor.
+      - name: Unit tests with coverage
         run: npm run coverage
 
       - name: Upload coverage report
@@ -37,11 +91,12 @@ jobs:
           path: coverage/
           retention-days: 7
 
+      # Keeps the production-build gate from the previous single-job
+      # workflow; a build failure reports against `unit`.
       - name: Build
         run: npm run build
 
   e2e:
-    needs: ci
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -58,7 +113,8 @@ jobs:
         run: npx playwright install --with-deps chromium
 
       # playwright.config.ts webServer starts `npm run dev` on :3000
-      # (reuseExistingServer is disabled under CI).
+      # (reuseExistingServer is disabled under CI). The suite includes
+      # axe-core accessibility checks (#34).
       - name: Run Playwright e2e tests
         run: npx playwright test
 
@@ -77,3 +133,24 @@ jobs:
           name: test-results
           path: test-results/
           retention-days: 7
+
+  gate:
+    # Aggregate required check. `always()` guarantees it reports even when an
+    # upstream job fails or the run is cancelled — a required check that could
+    # silently go missing would block or bypass merges unpredictably.
+    needs: [lint, typecheck, unit, e2e]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Summarize gate results
+        run: |
+          echo "lint:      ${{ needs.lint.result }}"
+          echo "typecheck: ${{ needs.typecheck.result }}"
+          echo "unit:      ${{ needs.unit.result }}"
+          echo "e2e:       ${{ needs.e2e.result }}"
+
+      - name: Enforce all checks passed
+        if: ${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') || contains(needs.*.result, 'skipped') }}
+        run: |
+          echo "::error::At least one required check did not pass (see summary above)."
+          exit 1
