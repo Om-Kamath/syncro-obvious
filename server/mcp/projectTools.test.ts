@@ -316,7 +316,8 @@ describe('delete_project', () => {
     const client = await connectMcpClient(baseUrl);
 
     const text = await expectError(callTool(client, 'delete_project', { id: '' }));
-    expect(text).toContain('id must be a non-empty string');
+    // The zod input schema rejects the empty id before any request is issued.
+    expect(text).toContain('Invalid arguments for tool delete_project');
     expect(projects.size).toBe(0);
   });
 });
