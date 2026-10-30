@@ -98,7 +98,7 @@ describe('splitClip', () => {
     // Right plays [4, 7) — media continuity across the split.
     expect(right.trimStart).toBe(4);
     expect(right.trimmedDuration).toBe(3);
-    expect(left.trimStart + left.trimmedDuration).toBe(right.trimStart);
+    expect(left.trimStart! + left.trimmedDuration!).toBe(right.trimStart);
 
     // Timeline continuity: right starts exactly where left ends.
     expect(left.startTime).toBe(1);
