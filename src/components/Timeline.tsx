@@ -15,7 +15,12 @@ function cn(...inputs: ClassValue[]) {
 }
 
 // Shared visible focus indicator for every interactive timeline control.
-const FOCUS_RING = 'focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:ring-offset-1';
+// Outline-based, not a ring: rings are box-shadows driven by custom
+// properties, so a ring focus indicator overrides a ring selection outline
+// when both apply (selected + keyboard-focused clip loses its selection
+// ring). A sky outline composes with the violet selection ring and is
+// clearly distinct from it.
+const FOCUS_RING = 'focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-sky-600';
 
 /** Imperative playback controls App-level shortcuts drive; the clock stays in the Timeline. */
 export interface TimelineTransport {
