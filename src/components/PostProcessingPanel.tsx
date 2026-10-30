@@ -20,6 +20,10 @@ import {
   Hash,
   Film,
   Trash2,
+  Plus,
+  X,
+  Clock,
+  AlertCircle,
 } from 'lucide-react';
 import { VideoClip, Voiceover, CaptionStyle, CaptionMode, VideoDescription, ThumbnailCandidate } from '../types';
 // Heavy export-only dependencies (Gemini post-processing, canvas frame capture) are
@@ -35,7 +39,7 @@ import type { CaptionTemplate } from '../types';
 import { estimateDescriptionCost, estimateKeyMomentsCost } from '../services/costEstimate';
 import type { PostProcessingInput } from '../services/costEstimate';
 import { CostEstimateBadge } from './CostEstimateBadge';
-import { EXPORT_PRESETS, DEFAULT_EXPORT_PRESET, computeDrawGeometry, type ExportPresetId } from '../utils/exportPresets';
+import { EXPORT_PRESETS, computeDrawGeometry, type ExportPreset, type ExportPresetId } from '../utils/exportPresets';
 import { audioChannelsOf, mixAudio, sliceAudioWindow, toAudioBuffer } from '../utils/audioMix';
 import { MusicPanel, DEFAULT_MUSIC_VOLUME } from './MusicPanel';
 import { EXPORT_CODECS, DEFAULT_EXPORT_CODEC, selectMimeType, type ExportCodecId } from '../utils/exportCodecs';
@@ -47,6 +51,8 @@ import {
   formatEstimatedSize,
   type QualityPresetId,
 } from '../utils/qualityPresets';
+import { isPresetPending, type ExportQueueItem, type RenderHandle, type RenderOutcome } from '../utils/exportQueue';
+import { useExportQueue, type ExportQueueApi } from '../hooks/useExportQueue';
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -908,34 +914,64 @@ function ThumbnailGrid({ items }: { items: ThumbnailCandidate[] }) {
 // ═══════════════════════════════════════════════════════════════════════════
 // TAB 4 — Export
 // ═══════════════════════════════════════════════════════════════════════════
+function QueueStatusIcon({ status }: { status: ExportQueueItem['status'] }) {
+  switch (status) {
+    case 'rendering':
+      return <Loader2 className="w-3.5 h-3.5 text-violet-500 animate-spin flex-shrink-0" />;
+    case 'done':
+      return <Check className="w-3.5 h-3.5 text-green-500 flex-shrink-0" />;
+    case 'cancelled':
+      return <X className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />;
+    case 'failed':
+      return <AlertCircle className="w-3.5 h-3.5 text-red-500 flex-shrink-0" />;
+    default:
+      return <Clock className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />;
+  }
+}
+
 function ExportTab({
   voiceover,
   videoClips,
-  captionStyle,
   captionsEnabled,
+  queue,
+  musicFile,
+  setMusicFile,
+  musicVolume,
+  setMusicVolume,
+  codecId,
+  setCodecId,
+  qualityId,
+  setQualityId,
 }: {
   voiceover: Voiceover | null;
   videoClips: VideoClip[];
-  captionStyle: CaptionStyle;
   captionsEnabled: boolean;
+  queue: ExportQueueApi;
+  musicFile: File | null;
+  setMusicFile: (f: File | null) => void;
+  musicVolume: number;
+  setMusicVolume: (v: number) => void;
+  codecId: ExportCodecId;
+  setCodecId: (id: ExportCodecId) => void;
+  qualityId: QualityPresetId;
+  setQualityId: (id: QualityPresetId) => void;
 }) {
-  const [isExporting, setIsExporting] = useState(false);
-  const [exportProgress, setExportProgress] = useState(0);
-  const [presetId, setPresetId] = useState<ExportPresetId>(DEFAULT_EXPORT_PRESET);
-  const preset = EXPORT_PRESETS[presetId];
-  const [musicFile, setMusicFile] = useState<File | null>(null);
-  const [musicVolume, setMusicVolume] = useState(DEFAULT_MUSIC_VOLUME);
-  const [exportError, setExportError] = useState<string | null>(null);
-  const [codecId, setCodecId] = useState<ExportCodecId>(DEFAULT_EXPORT_CODEC);
+  const rendering = queue.items.find(item => item.status === 'rendering') ?? null;
+  const activeCount = queue.items.filter(item => item.status === 'queued' || item.status === 'rendering').length;
+  const queueActive = activeCount > 0;
+
   // Probe MediaRecorder support on render — cheap (a handful of string checks)
   // and always current, so the UI reflects what a recording would actually use.
   const selected = selectMimeType(
     codecId,
     m => typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported(m)
   );
-  const [qualityId, setQualityId] = useState<QualityPresetId>(DEFAULT_QUALITY_PRESET);
   const quality = QUALITY_PRESETS[qualityId];
-  const stopRef = useRef<(() => void) | null>(null);
+
+  const handleEnqueue = (presetId: ExportPresetId) => {
+    if (!voiceover || videoClips.length === 0) return;
+    queue.enqueue(presetId);
+  };
 
   const handleDownloadAsset = (url: string, name: string) => {
     const a = document.createElement('a');
@@ -956,153 +992,7 @@ function ExportTab({
     downloadTextFile(generateVTT(segments), 'captions.vtt', 'text/vtt');
   };
 
-  const handleExportVideo = async () => {
-    if (!voiceover || videoClips.length === 0) return;
-    setIsExporting(true);
-    setExportProgress(0);
-    setExportError(null);
 
-    let audioCtx: AudioContext | null = null;
-    try {
-      // Chunk is fetched once here; the draw loop and recorder.onstop close over the bindings.
-      const { downloadFile, getClipAtTime } = await import('../utils/exportUtils');
-      const W = preset.width;
-      const H = preset.height;
-      const canvas = document.createElement('canvas');
-      canvas.width = W;
-      canvas.height = H;
-      const ctx = canvas.getContext('2d')!;
-
-      // Pre-load render video elements — only store ones that loaded successfully
-      const renderVids: Record<string, HTMLVideoElement> = {};
-      await Promise.all(videoClips.map(clip =>
-        new Promise<void>(res => {
-          const v = document.createElement('video');
-          v.src = clip.url;
-          v.muted = true;
-          v.preload = 'auto';
-          v.addEventListener('loadeddata', () => { renderVids[clip.id] = v; res(); }, { once: true });
-          v.addEventListener('error', () => res(), { once: true }); // skip broken clips, don't store
-          v.load();
-        })
-      ));
-
-      // Audio setup — decode narration (and music) fully, mix them in the
-      // sample domain, then record the mixed buffer. Both files decode through
-      // the same AudioContext, so their sample rates always match.
-      audioCtx = new AudioContext();
-      const narrationBytes = voiceover.file
-        ? await voiceover.file.arrayBuffer()
-        : await fetch(voiceover.url).then(r => {
-            if (!r.ok) throw new Error(`Narration audio unavailable (HTTP ${r.status})`);
-            return r.arrayBuffer();
-          });
-      const narrationBuffer = await audioCtx.decodeAudioData(narrationBytes);
-
-      let musicBuffer: AudioBuffer | null = null;
-      if (musicFile) {
-        musicBuffer = await audioCtx.decodeAudioData(await musicFile.arrayBuffer());
-      }
-
-      const trimStartSec = voiceover.trimStart ?? 0;
-      const trimEndSec = voiceover.trimEnd ?? voiceover.duration;
-      const mixedBuffer = toAudioBuffer(
-        mixAudio(
-          sliceAudioWindow(narrationBuffer, trimStartSec, trimEndSec),
-          musicBuffer ? audioChannelsOf(musicBuffer) : null,
-          musicVolume,
-        ),
-        audioCtx,
-      );
-
-      const dest = audioCtx.createMediaStreamDestination();
-      const source = audioCtx.createBufferSource();
-      source.buffer = mixedBuffer;
-      source.connect(dest);
-      source.connect(audioCtx.destination);
-
-      // Build combined stream
-      const canvasStream = canvas.captureStream(30);
-      const combined = new MediaStream([
-        ...canvasStream.getTracks(),
-        ...dest.stream.getTracks(),
-      ]);
-
-      const { mimeType, ext } = selected;
-      const recorderOptions: MediaRecorderOptions = { mimeType };
-      if (quality.videoBitsPerSecond !== null) {
-        recorderOptions.videoBitsPerSecond = quality.videoBitsPerSecond;
-      }
-      const recorder = new MediaRecorder(combined, recorderOptions);
-      const chunks: Blob[] = [];
-      recorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
-      recorder.onstop = () => {
-        const blob = new Blob(chunks, { type: mimeType });
-        downloadFile(blob, `syncvoice-export.${ext}`);
-        setIsExporting(false);
-        setExportProgress(0);
-        Object.values(renderVids).forEach(v => { v.pause(); v.remove(); });
-        audioCtx?.close();
-      };
-
-      const duration = trimEndSec - trimStartSec;
-      const startWall = performance.now();
-
-      let rafId: number;
-      const draw = () => {
-        const elapsed = (performance.now() - startWall) / 1000;
-        setExportProgress(Math.min(elapsed / duration, 1));
-
-        if (elapsed >= duration) {
-          recorder.stop();
-          cancelAnimationFrame(rafId);
-          return;
-        }
-
-        // Find active clip
-        const hit = getClipAtTime(videoClips, elapsed);
-        ctx.fillStyle = '#000';
-        ctx.fillRect(0, 0, W, H);
-        if (hit) {
-          const v = renderVids[hit.clip.id];
-          if (v) {
-            // Seek if drifted; play (muted) so frames decode
-            if (Math.abs(v.currentTime - hit.localTime) > 0.2) v.currentTime = hit.localTime;
-            if (v.paused) v.play().catch(() => {});
-            try {
-              const g = computeDrawGeometry(preset, v.videoWidth, v.videoHeight);
-              ctx.drawImage(v, g.dx, g.dy, g.dWidth, g.dHeight);
-            } catch { /* skip */ }
-          }
-        }
-
-        // Draw captions
-        if (captionsEnabled && voiceover.segments) {
-          const seg = voiceover.segments.find(s => elapsed >= s.start && elapsed <= s.end);
-          if (seg) drawCaptionOnCanvas(ctx, W, H, seg.text, captionStyle);
-        }
-
-        rafId = requestAnimationFrame(draw);
-      };
-
-      stopRef.current = () => {
-        recorder.stop();
-        cancelAnimationFrame(rafId);
-        Object.values(renderVids).forEach(v => { v.pause(); v.remove(); });
-        setIsExporting(false);
-        setExportProgress(0);
-      };
-
-      recorder.start(100);
-      source.start();
-      rafId = requestAnimationFrame(draw);
-    } catch (e) {
-      console.error('Export failed:', e);
-      setExportError(e instanceof Error ? e.message : 'Export failed. Check your audio files and try again.');
-      setIsExporting(false);
-      audioCtx?.close();
-    }
-  };
 
   const hasContent = videoClips.length > 0 || !!voiceover;
 
@@ -1213,7 +1103,8 @@ function ExportTab({
               <div>
                 <p className="text-sm font-semibold text-gray-900">Export Combined Video</p>
                 <p className="text-xs text-violet-500 mt-0.5">
-                  Records the aligned sequence with narration audio
+                  Queue one or more aspect presets — renders run one at a time with per-item progress
+                  and cancel. Records the aligned sequence with audio
                   {captionsEnabled ? ' and burned-in captions' : ''}.
                 </p>
               </div>
@@ -1222,43 +1113,43 @@ function ExportTab({
             <MusicPanel
               file={musicFile}
               volume={musicVolume}
-              disabled={isExporting}
+              disabled={!!rendering || activeCount > 0}
               onFileChange={setMusicFile}
               onVolumeChange={setMusicVolume}
             />
 
-            {exportError && (
-              <div className="p-2 bg-red-50 border border-red-200 rounded-lg text-xs text-red-500" role="alert">
-                {exportError}
-              </div>
-            )}
-
             <div className="space-y-2">
-              <p className="text-xs font-semibold text-gray-900">Aspect Preset</p>
+              <p className="text-xs font-semibold text-gray-900">Aspect Presets</p>
               <div className="grid grid-cols-3 gap-2">
-                {Object.values(EXPORT_PRESETS).map(p => (
-                  <button
-                    key={p.id}
-                    onClick={() => setPresetId(p.id)}
-                    disabled={isExporting}
-                    className={cn(
-                      'flex flex-col items-center gap-0.5 px-2 py-2 rounded-xl border text-xs font-semibold transition-all disabled:opacity-50',
-                      presetId === p.id
-                        ? 'bg-violet-50 border-violet-400 text-violet-600'
-                        : 'bg-white border-gray-200 text-gray-600 hover:border-violet-300'
-                    )}
-                  >
-                    <span>{p.label}</span>
-                    <span className="text-[10px] font-normal text-gray-400 text-center leading-tight">
-                      {p.description}
-                    </span>
-                  </button>
-                ))}
+                {Object.values(EXPORT_PRESETS).map(p => {
+                  const pending = isPresetPending(queue.items, p.id);
+                  return (
+                    <button
+                      key={p.id}
+                      onClick={() => handleEnqueue(p.id)}
+                      disabled={pending}
+                      title={pending ? 'Already in the render queue' : `Add ${p.label} export to queue`}
+                      className={cn(
+                        'flex flex-col items-center gap-0.5 px-2 py-2 rounded-xl border text-xs font-semibold transition-all disabled:opacity-60',
+                        pending
+                          ? 'bg-violet-50 border-violet-400 text-violet-600'
+                          : 'bg-white border-gray-200 text-gray-600 hover:border-violet-300'
+                      )}
+                    >
+                      <span className="flex items-center gap-1">
+                        {pending ? <Check className="w-3 h-3" /> : <Plus className="w-3 h-3" />}
+                        {p.label}
+                      </span>
+                      <span className="text-[10px] font-normal text-gray-400 text-center leading-tight">
+                        {p.description}
+                      </span>
+                      <span className="text-[10px] font-normal text-gray-400">
+                        {p.width}×{p.height} · {p.fit === 'cover' ? 'smart crop' : 'letterbox'}
+                      </span>
+                    </button>
+                  );
+                })}
               </div>
-              <p className="text-[10px] text-gray-400">
-                Output: {preset.width}×{preset.height} ·{' '}
-                {preset.fit === 'cover' ? 'smart crop (center-crop to fill)' : 'letterbox (full frame)'}
-              </p>
             </div>
 
             <div className="space-y-2">
@@ -1268,7 +1159,7 @@ function ExportTab({
                   <button
                     key={c.id}
                     onClick={() => setCodecId(c.id)}
-                    disabled={isExporting}
+                    disabled={queueActive}
                     className={cn(
                       'flex flex-col items-center gap-0.5 px-2 py-2 rounded-xl border text-xs font-semibold transition-all disabled:opacity-50',
                       codecId === c.id
@@ -1301,7 +1192,7 @@ function ExportTab({
                   <button
                     key={q.id}
                     onClick={() => setQualityId(q.id)}
-                    disabled={isExporting}
+                    disabled={queueActive}
                     className={cn(
                       'flex flex-col items-center gap-0.5 px-2 py-2 rounded-xl border text-xs font-semibold transition-all disabled:opacity-50',
                       qualityId === q.id
@@ -1319,44 +1210,85 @@ function ExportTab({
               {sizeNote && <p className="text-[10px] text-gray-400">{sizeNote}</p>}
             </div>
 
-            {isExporting && (
+            {queue.items.length > 0 && (
               <div className="space-y-2">
-                <div className="flex justify-between text-xs font-medium text-violet-400">
-                  <span>Recording…</span>
-                  <span>{Math.round(exportProgress * 100)}%</span>
+                <div className="flex items-center justify-between">
+                  <p className="text-xs font-semibold text-gray-900">
+                    Render Queue
+                    {rendering && (
+                      <span className="ml-2 text-[10px] font-normal text-violet-500">
+                        Rendering {queue.items.findIndex(item => item.status === 'rendering') + 1} of{' '}
+                        {queue.items.length}
+                      </span>
+                    )}
+                  </p>
+                  {activeCount > 0 ? (
+                    <button
+                      onClick={queue.cancelAll}
+                      className="text-[10px] font-semibold uppercase tracking-wider text-red-400 hover:text-red-600"
+                    >
+                      Cancel all
+                    </button>
+                  ) : (
+                    <button
+                      onClick={queue.clearFinished}
+                      className="text-[10px] font-semibold uppercase tracking-wider text-gray-400 hover:text-gray-600"
+                    >
+                      Clear
+                    </button>
+                  )}
                 </div>
-                <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
-                  <motion.div
-                    className="h-full bg-violet-500 rounded-full"
-                    style={{ width: `${exportProgress * 100}%` }}
-                    transition={{ duration: 0.1 }}
-                  />
+                <div className="space-y-1.5">
+                  {queue.items.map(item => {
+                    const preset = EXPORT_PRESETS[item.presetId];
+                    return (
+                      <div
+                        key={item.id}
+                        className="p-2.5 bg-white border border-gray-200 rounded-xl space-y-1.5"
+                      >
+                        <div className="flex items-center gap-2">
+                          <QueueStatusIcon status={item.status} />
+                          <span className="text-xs font-semibold text-gray-900 flex-1 min-w-0 truncate">
+                            {preset.label}
+                            <span className="font-normal text-gray-400">
+                              {' '}
+                              · {preset.width}×{preset.height}
+                            </span>
+                          </span>
+                          {item.status === 'rendering' && (
+                            <button
+                              onClick={queue.cancelActive}
+                              className="text-[10px] font-semibold text-red-400 hover:text-red-600"
+                            >
+                              Cancel
+                            </button>
+                          )}
+                          {item.status === 'queued' && (
+                            <button
+                              onClick={() => queue.removeItem(item.id)}
+                              className="text-[10px] font-semibold text-gray-400 hover:text-gray-600"
+                            >
+                              Remove
+                            </button>
+                          )}
+                        </div>
+                        {item.status === 'rendering' && (
+                          <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                            <div
+                              className="h-full bg-violet-500 rounded-full transition-all"
+                              style={{ width: `${item.progress * 100}%` }}
+                            />
+                          </div>
+                        )}
+                        {item.status === 'failed' && (
+                          <p className="text-[10px] text-red-500">{item.error ?? 'Export failed.'}</p>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             )}
-
-
-            <div className="flex gap-3">
-              {!isExporting ? (
-                <button
-                  onClick={handleExportVideo}
-                  className="flex items-center gap-2 px-4 py-2.5 text-sm font-semibold bg-violet-600 text-white rounded-xl hover:bg-violet-500 transition-all"
-                >
-                  <Film className="w-4 h-4" />
-                  Start Export
-                </button>
-              ) : (
-                <button
-                  onClick={() => stopRef.current?.()}
-                  className="flex items-center gap-2 px-4 py-2.5 text-sm font-semibold bg-red-900/30 text-red-400 rounded-xl hover:bg-red-900/50 transition-all"
-                >
-                  Cancel
-                </button>
-              )}
-              <span className="flex items-center text-[10px] font-bold text-violet-500 uppercase tracking-wider">
-                MP4 / WebM
-              </span>
-            </div>
           </div>
         </div>
       )}
@@ -1408,6 +1340,204 @@ function drawCaptionOnCanvas(
     ctx.fillText(line, W / 2, boxY + padY + (i + 0.82) * lh, maxW);
   });
 }
+// ── One preset render: canvas + MediaRecorder driven by the export queue ─────
+interface CombinedRenderOptions {
+  videoClips: VideoClip[];
+  voiceover: Voiceover;
+  preset: ExportPreset;
+  captionsEnabled: boolean;
+  captionStyle: CaptionStyle;
+  onProgress: (progress: number) => void;
+  musicFile: File | null;
+  musicVolume: number;
+  codecId: ExportCodecId;
+  qualityId: QualityPresetId;
+}
+
+/**
+ * Start one combined-video render for a preset. Resolves `{ cancelled: true }`
+ * when cancelled before finishing (partial output is discarded — a cancelled
+ * queue item is not a download); rejects when setup fails. The queue hook owns
+ * sequencing; this function owns a single render's lifecycle.
+ */
+function startCombinedRender(opts: CombinedRenderOptions): RenderHandle {
+  const { videoClips, voiceover, preset, captionsEnabled, captionStyle, onProgress, musicFile, musicVolume, codecId, qualityId } = opts;
+
+  let settle!: (outcome: RenderOutcome) => void;
+  let reject!: (error: Error) => void;
+  const promise = new Promise<RenderOutcome>((res, rej) => { settle = res; reject = rej; });
+
+  let done = false;
+  let stopped = false;
+  let recorder: MediaRecorder | null = null;
+  let audioCtx: AudioContext | null = null;
+  const renderVids: Record<string, HTMLVideoElement> = {};
+  let rafId = 0;
+
+  const cleanup = () => {
+    cancelAnimationFrame(rafId);
+    // Every render creates its own context and browsers cap open ones — close it.
+    void audioCtx?.close().catch(() => {}); // close() rejects when already closed; harmless in cleanup
+    Object.values(renderVids).forEach(v => { v.pause(); v.remove(); });
+  };
+
+  const finishCancel = () => { if (!done) { done = true; settle({ cancelled: true }); } };
+  const finishOk = () => { if (!done) { done = true; settle({ cancelled: false }); } };
+  const finishError = (e: unknown) => {
+    if (done) return;
+    done = true;
+    reject(e instanceof Error ? e : new Error(String(e)));
+  };
+
+  const cancel = () => {
+    stopped = true;
+    if (recorder && recorder.state === 'recording') recorder.stop(); // onstop settles
+  };
+
+  void (async () => {
+    try {
+      // Chunk is fetched once here; the draw loop and recorder.onstop close over the bindings.
+      const { downloadFile, getClipAtTime } = await import('../utils/exportUtils');
+      const W = preset.width;
+      const H = preset.height;
+      const canvas = document.createElement('canvas');
+      canvas.width = W;
+      canvas.height = H;
+      const ctx = canvas.getContext('2d')!;
+
+      // Pre-load render video elements — only store ones that loaded successfully
+      await Promise.all(videoClips.map(clip =>
+        new Promise<void>(res => {
+          const v = document.createElement('video');
+          v.src = clip.url;
+          v.muted = true;
+          v.preload = 'auto';
+          v.addEventListener('loadeddata', () => { renderVids[clip.id] = v; res(); }, { once: true });
+          v.addEventListener('error', () => res(), { once: true }); // skip broken clips, don't store
+          v.load();
+        })
+      ));
+      if (stopped) { cleanup(); finishCancel(); return; }
+
+      // Audio setup — decode narration (and optional music) fully, mix them in
+      // the sample domain, then record the mixed buffer. Both files decode
+      // through the same AudioContext, so their sample rates always match.
+      audioCtx = new AudioContext();
+      const narrationBytes = voiceover.file
+        ? await voiceover.file.arrayBuffer()
+        : await fetch(voiceover.url).then(r => {
+            if (!r.ok) throw new Error(`Narration audio unavailable (HTTP ${r.status})`);
+            return r.arrayBuffer();
+          });
+      const narrationBuffer = await audioCtx.decodeAudioData(narrationBytes);
+
+      let musicBuffer: AudioBuffer | null = null;
+      if (musicFile) {
+        musicBuffer = await audioCtx.decodeAudioData(await musicFile.arrayBuffer());
+      }
+
+      const trimStartSec = voiceover.trimStart ?? 0;
+      const trimEndSec = voiceover.trimEnd ?? voiceover.duration;
+      const mixedBuffer = toAudioBuffer(
+        mixAudio(
+          sliceAudioWindow(narrationBuffer, trimStartSec, trimEndSec),
+          musicBuffer ? audioChannelsOf(musicBuffer) : null,
+          musicVolume,
+        ),
+        audioCtx,
+      );
+      if (stopped) { cleanup(); finishCancel(); return; }
+
+      const dest = audioCtx.createMediaStreamDestination();
+      const source = audioCtx.createBufferSource();
+      source.buffer = mixedBuffer;
+      source.connect(dest);
+      source.connect(audioCtx.destination);
+
+      // Build combined stream
+      const canvasStream = canvas.captureStream(30);
+      const combined = new MediaStream([
+        ...canvasStream.getTracks(),
+        ...dest.stream.getTracks(),
+      ]);
+
+      // Same selection the Format picker shows: honour the user's codec choice,
+      // falling back when the browser lacks support for it.
+      const selected = selectMimeType(
+        codecId,
+        m => typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported(m)
+      );
+      const { mimeType, ext } = selected;
+      const quality = QUALITY_PRESETS[qualityId];
+      const recorderOptions: MediaRecorderOptions = { mimeType };
+      if (quality.videoBitsPerSecond !== null) {
+        recorderOptions.videoBitsPerSecond = quality.videoBitsPerSecond;
+      }
+      recorder = new MediaRecorder(combined, recorderOptions);
+      const chunks: Blob[] = [];
+      recorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
+      recorder.onstop = () => {
+        cleanup();
+        if (stopped) { finishCancel(); return; }
+        const blob = new Blob(chunks, { type: mimeType });
+        downloadFile(blob, `syncvoice-export-${preset.id}.${ext}`);
+        finishOk();
+      };
+
+      const duration = trimEndSec - trimStartSec;
+      if (!(duration > 0)) throw new Error('Voiceover has no duration to export.');
+
+      const startWall = performance.now();
+      const draw = () => {
+        const elapsed = (performance.now() - startWall) / 1000;
+        onProgress(Math.min(elapsed / duration, 1));
+
+        if (elapsed >= duration) {
+          recorder!.stop(); // draw only runs after recorder.start, so it is set
+          cancelAnimationFrame(rafId);
+          return;
+        }
+
+        // Find active clip
+        const hit = getClipAtTime(videoClips, elapsed);
+        ctx.fillStyle = '#000';
+        ctx.fillRect(0, 0, W, H);
+        if (hit) {
+          const v = renderVids[hit.clip.id];
+          if (v) {
+            // Seek if drifted; play (muted) so frames decode
+            if (Math.abs(v.currentTime - hit.localTime) > 0.2) v.currentTime = hit.localTime;
+            if (v.paused) v.play().catch(() => {});
+            try {
+              const g = computeDrawGeometry(preset, v.videoWidth, v.videoHeight);
+              ctx.drawImage(v, g.dx, g.dy, g.dWidth, g.dHeight);
+            } catch { /* skip */ }
+          }
+        }
+
+        // Draw captions
+        if (captionsEnabled && voiceover.segments) {
+          const seg = voiceover.segments.find(s => elapsed >= s.start && elapsed <= s.end);
+          if (seg) drawCaptionOnCanvas(ctx, W, H, seg.text, captionStyle);
+        }
+
+        rafId = requestAnimationFrame(draw);
+      };
+
+      recorder.start(100);
+      source.start();
+      rafId = requestAnimationFrame(draw);
+    } catch (e) {
+      console.error('Export failed:', e);
+      cleanup();
+      if (stopped) finishCancel();
+      else finishError(e);
+    }
+  })();
+
+  return { promise, cancel };
+}
+
 
 // ═══════════════════════════════════════════════════════════════════════════
 // MAIN PANEL
@@ -1437,6 +1567,31 @@ export function PostProcessingPanel({
   onImportCaptions,
 }: PostProcessingPanelProps) {
   const [activeTab, setActiveTab] = useState<Tab>('description');
+  // Music settings live at panel level so the queue's renderer can read them;
+  // switching tabs mid-batch must not lose either the batch or the settings.
+  const [musicFile, setMusicFile] = useState<File | null>(null);
+  const [musicVolume, setMusicVolume] = useState(DEFAULT_MUSIC_VOLUME);
+  // Codec choice also lives at panel level so queued renders all use it.
+  const [codecId, setCodecId] = useState<ExportCodecId>(DEFAULT_EXPORT_CODEC);
+  // Same for the quality preset — every queued render records at it.
+  const [qualityId, setQualityId] = useState<QualityPresetId>(DEFAULT_QUALITY_PRESET);
+
+  // The queue lives at panel level so switching tabs mid-batch doesn't kill the renders.
+  const queue = useExportQueue((preset, onProgress) => {
+    if (!voiceover) throw new Error('No voiceover to export.');
+    return startCombinedRender({
+      videoClips,
+      voiceover,
+      preset,
+      captionsEnabled,
+      captionStyle,
+      onProgress,
+      musicFile,
+      musicVolume,
+      codecId,
+      qualityId,
+    });
+  });
 
   const hasTranscription = !!voiceover?.transcription && !!voiceover?.segments?.length;
   const hasClips = videoClips.length > 0;
@@ -1540,8 +1695,16 @@ export function PostProcessingPanel({
             <ExportTab
               voiceover={voiceover}
               videoClips={videoClips}
-              captionStyle={captionStyle}
               captionsEnabled={captionsEnabled}
+              queue={queue}
+              musicFile={musicFile}
+              setMusicFile={setMusicFile}
+              musicVolume={musicVolume}
+              setMusicVolume={setMusicVolume}
+              codecId={codecId}
+              setCodecId={setCodecId}
+              qualityId={qualityId}
+              setQualityId={setQualityId}
             />
           )}
         </motion.div>
