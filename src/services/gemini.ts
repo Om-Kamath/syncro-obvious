@@ -1,7 +1,8 @@
 import { Type, FileState } from "@google/genai";
 import { startLog, finishLog } from "./logger";
 import { generateContent, getAI } from "./geminiClient";
-import { modelFor } from "./models";
+import { modelFor, resolveOperationModel } from "./models";
+import { getModelSettings } from "./modelSettings";
 import { LruCache } from "../utils/lruCache";
 
 // -------------------------------------------------------------------
@@ -121,7 +122,7 @@ export async function generateNarrationFromVideos(
   videoClips: Array<{ name: string; analysis: string; duration: number }>,
   voiceName = 'Aoede'
 ): Promise<{ url: string; duration: number; transcription: string }> {
-  const MODEL = modelFor('narration');
+  const MODEL = resolveOperationModel(getModelSettings(), 'narration');
   const totalDuration = videoClips.reduce((s, c) => s + c.duration, 0);
   const log = startLog('Generate Narration Script', MODEL, `${videoClips.length} clips | total ${totalDuration.toFixed(1)}s`);
   try {
@@ -170,8 +171,9 @@ export function estimateSegments(
 export async function analyzeVoiceover(
   audioFile: File
 ): Promise<{ transcription: string; segments: Array<{ text: string; start: number; end: number }> }> {
-  // flash-lite: fast, cheap, current GA — same model as analyzeVideo
-  const MODEL = modelFor('transcription');
+  // Model resolves from user settings (default tier / per-op override),
+  // falling back to the registry baseline when untouched.
+  const MODEL = resolveOperationModel(getModelSettings(), 'transcription');
   const log = startLog('Analyze Voiceover', MODEL, audioFile.name);
   try {
     // Upload + measure duration in parallel
@@ -204,7 +206,7 @@ export async function analyzeVoiceover(
 }
 
 export async function analyzeVideo(videoFile: File): Promise<string> {
-  const MODEL = modelFor('videoAnalysis');
+  const MODEL = resolveOperationModel(getModelSettings(), 'videoAnalysis');
   const log = startLog('Analyze Video', MODEL, videoFile.name);
   try {
     const fileUri = await getFileUri(videoFile);
@@ -236,7 +238,7 @@ export async function suggestAlignment(
   voiceoverTranscription: string,
   videoClips: Array<{ id: string; name: string; analysis: string; duration?: number }>
 ): Promise<AlignmentEntry[]> {
-  const MODEL = modelFor('clipAlignment');
+  const MODEL = resolveOperationModel(getModelSettings(), 'clipAlignment');
   const log = startLog('Suggest Alignment', MODEL, `${videoClips.length} clips`);
   try {
     const prompt = `You are an expert video editor. Your task is to arrange video clips into the best playback order so the visuals naturally illustrate a voiceover narration.

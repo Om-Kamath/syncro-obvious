@@ -1,6 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
-const { generateContentMock } = vi.hoisted(() => ({ generateContentMock: vi.fn() }));
+const { generateContentMock, getModelSettingsMock } = vi.hoisted(() => ({
+  generateContentMock: vi.fn(),
+  getModelSettingsMock: vi.fn(),
+}));
 
 vi.mock('@google/genai', () => ({
   GoogleGenAI: class {
@@ -25,6 +28,10 @@ vi.mock('@google/genai', () => ({
 
 vi.mock('./apiKey', () => ({
   getApiKey: () => 'test-key',
+}));
+
+vi.mock('./modelSettings', () => ({
+  getModelSettings: getModelSettingsMock,
 }));
 
 import { generateAudioFromScript, generateNarrationFromVideos, inlineAudioToWavBytes, pcmBase64ToWavBytes, estimateSegments } from './gemini';
@@ -54,6 +61,7 @@ const originalRevokeObjectURL = URL.revokeObjectURL;
 
 beforeEach(() => {
   generateContentMock.mockReset();
+  getModelSettingsMock.mockReset().mockReturnValue({});
   capturedBlob = null;
   URL.createObjectURL = vi.fn((blob: Blob) => {
     capturedBlob = blob;
@@ -180,6 +188,30 @@ describe('generateNarrationFromVideos', () => {
     expect(generateContentMock.mock.calls[0][0].model).toBe('gemini-3.5-flash-lite');
     expect(generateContentMock.mock.calls[1][0].model).toBe('gemini-3.8-flash-tts');
     expect(result.transcription).toBe('A narration script.');
+  });
+});
+
+describe('per-op model selection', () => {
+  it('keeps registry baselines when settings are untouched', async () => {
+    generateContentMock
+      .mockResolvedValueOnce({ text: 'A narration script.' })
+      .mockResolvedValueOnce(audioPart({ data: toB64(Uint8Array.from([1, 2, 3])), mimeType: 'audio/wav' }));
+
+    await generateNarrationFromVideos([{ name: 'clip.mp4', analysis: 'a beach', duration: 10 }]);
+
+    expect(generateContentMock.mock.calls[0][0].model).toBe('gemini-3.5-flash-lite');
+  });
+
+  it('threads the settings default and per-op override through to generateContent (TTS stays pinned)', async () => {
+    getModelSettingsMock.mockReturnValue({ defaultTier: 'flash', overrides: { narration: 'pro' } });
+    generateContentMock
+      .mockResolvedValueOnce({ text: 'A narration script.' })
+      .mockResolvedValueOnce(audioPart({ data: toB64(Uint8Array.from([1, 2, 3])), mimeType: 'audio/wav' }));
+
+    await generateNarrationFromVideos([{ name: 'clip.mp4', analysis: 'a beach', duration: 10 }]);
+
+    expect(generateContentMock.mock.calls[0][0].model).toBe('gemini-4-argon');
+    expect(generateContentMock.mock.calls[1][0].model).toBe('gemini-3.8-flash-tts');
   });
 });
 

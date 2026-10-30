@@ -29,6 +29,10 @@ vi.mock('./apiKey', () => ({
   getApiKey: getApiKeyMock,
 }));
 
+vi.mock('./modelSettings', () => ({
+  getModelSettings: () => ({}),
+}));
+
 import { generateDescription, identifyKeyMoments, parseModelJson } from './postProcessing';
 
 const transcription = 'We hiked the ridge at dawn and found an abandoned cabin.';

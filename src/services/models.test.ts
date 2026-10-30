@@ -2,17 +2,28 @@ import { describe, it, expect } from 'vitest';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { MODELS, FEATURE_MODELS, modelFor } from './models';
+import {
+  MODELS,
+  FEATURE_MODELS,
+  TIER_MODELS,
+  modelFor,
+  resolveOperationModel,
+  type ModelSettings,
+} from './models';
 
 describe('MODELS registry', () => {
   it('exposes exactly the expected registry keys', () => {
-    expect(Object.keys(MODELS).sort()).toEqual(['flash', 'flashLite', 'tts']);
+    expect(Object.keys(MODELS).sort()).toEqual(['flash', 'flashLite', 'pro', 'tts']);
   });
 
   it('pins the current GA model ids', () => {
     expect(MODELS.tts).toBe('gemini-3.8-flash-tts');
     expect(MODELS.flashLite).toBe('gemini-3.5-flash-lite');
     expect(MODELS.flash).toBe('gemini-3.8-flash');
+  });
+
+  it('pins the Pro tier to the flagship model id (no gemini-3.8-pro exists)', () => {
+    expect(MODELS.pro).toBe('gemini-4-argon');
   });
 
   it('uses well-formed, unique model ids', () => {
@@ -53,6 +64,54 @@ describe('FEATURE_MODELS', () => {
     expect(modelFor('clipAlignment')).toBe(MODELS.flashLite);
     expect(modelFor('description')).toBe(MODELS.flash);
     expect(modelFor('thumbnails')).toBe(MODELS.flash);
+  });
+});
+
+describe('model selection tiers', () => {
+  it('resolves every tier through the registry — no raw ids in the selection table', () => {
+    const registryIds = Object.values(MODELS);
+    for (const id of Object.values(TIER_MODELS)) {
+      expect(registryIds, `tier model ${id} must come from MODELS`).toContain(id);
+    }
+  });
+
+  it('exposes exactly the three text tiers (TTS stays pinned to its audio model)', () => {
+    expect(Object.keys(TIER_MODELS).sort()).toEqual(['flash', 'flashLite', 'pro']);
+  });
+});
+
+describe('resolveOperationModel (effective-model resolution)', () => {
+  it('uses the registry baseline when no settings exist', () => {
+    expect(resolveOperationModel({}, 'transcription')).toBe(MODELS.flashLite);
+    expect(resolveOperationModel({}, 'description')).toBe(MODELS.flash);
+  });
+
+  it('applies the settings default to an operation without an override', () => {
+    expect(resolveOperationModel({ defaultTier: 'pro' }, 'transcription')).toBe(MODELS.pro);
+    expect(resolveOperationModel({ defaultTier: 'flash' }, 'transcription')).toBe(MODELS.flash);
+    expect(resolveOperationModel({ defaultTier: 'flashLite' }, 'description')).toBe(MODELS.flashLite);
+  });
+
+  it('a per-op override wins over the settings default', () => {
+    const settings: ModelSettings = { defaultTier: 'flash', overrides: { transcription: 'pro' } };
+    expect(resolveOperationModel(settings, 'transcription')).toBe(MODELS.pro);
+  });
+
+  it('an override downgrades as well as upgrades', () => {
+    const settings: ModelSettings = { defaultTier: 'pro', overrides: { description: 'flashLite' } };
+    expect(resolveOperationModel(settings, 'description')).toBe(MODELS.flashLite);
+  });
+
+  it('an override on one operation does not leak into another', () => {
+    const settings: ModelSettings = { defaultTier: 'flash', overrides: { transcription: 'pro' } };
+    expect(resolveOperationModel(settings, 'clipAlignment')).toBe(MODELS.flash);
+    expect(resolveOperationModel(settings, 'description')).toBe(MODELS.flash);
+  });
+
+  it('an override applies even without a settings default', () => {
+    const settings: ModelSettings = { overrides: { thumbnails: 'pro' } };
+    expect(resolveOperationModel(settings, 'thumbnails')).toBe(MODELS.pro);
+    expect(resolveOperationModel(settings, 'transcription')).toBe(MODELS.flashLite);
   });
 });
 
