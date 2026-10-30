@@ -24,6 +24,8 @@ import { generateDescription, identifyKeyMoments } from '../services/postProcess
 import { generateSRT, generateVTT, downloadTextFile } from '../utils/captionUtils';
 import { captureVideoFrame, addQuoteOverlay, downloadDataUrl, downloadFile, getClipAtTime } from '../utils/exportUtils';
 import { EXPORT_PRESETS, DEFAULT_EXPORT_PRESET, computeDrawGeometry, type ExportPresetId } from '../utils/exportPresets';
+import { audioChannelsOf, mixAudio, sliceAudioWindow, toAudioBuffer } from '../utils/audioMix';
+import { MusicPanel, DEFAULT_MUSIC_VOLUME } from './MusicPanel';
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -633,6 +635,9 @@ function ExportTab({
   const [exportProgress, setExportProgress] = useState(0);
   const [presetId, setPresetId] = useState<ExportPresetId>(DEFAULT_EXPORT_PRESET);
   const preset = EXPORT_PRESETS[presetId];
+  const [musicFile, setMusicFile] = useState<File | null>(null);
+  const [musicVolume, setMusicVolume] = useState(DEFAULT_MUSIC_VOLUME);
+  const [exportError, setExportError] = useState<string | null>(null);
   const stopRef = useRef<(() => void) | null>(null);
 
   const handleDownloadAsset = (url: string, name: string) => {
@@ -656,7 +661,9 @@ function ExportTab({
     if (!voiceover || videoClips.length === 0) return;
     setIsExporting(true);
     setExportProgress(0);
+    setExportError(null);
 
+    let audioCtx: AudioContext | null = null;
     try {
       const W = preset.width;
       const H = preset.height;
@@ -679,19 +686,39 @@ function ExportTab({
         })
       ));
 
-      // Audio setup — preload fully before recording starts
-      const audioCtx = new AudioContext();
-      const audioEl = new Audio(voiceover.url);
-      audioEl.preload = 'auto';
-      await new Promise<void>((res, rej) => {
-        audioEl.addEventListener('canplaythrough', () => res(), { once: true });
-        audioEl.addEventListener('error', () => rej(new Error('Audio load failed')), { once: true });
-        audioEl.load();
-      });
-      const src = audioCtx.createMediaElementSource(audioEl);
+      // Audio setup — decode narration (and music) fully, mix them in the
+      // sample domain, then record the mixed buffer. Both files decode through
+      // the same AudioContext, so their sample rates always match.
+      audioCtx = new AudioContext();
+      const narrationBytes = voiceover.file
+        ? await voiceover.file.arrayBuffer()
+        : await fetch(voiceover.url).then(r => {
+            if (!r.ok) throw new Error(`Narration audio unavailable (HTTP ${r.status})`);
+            return r.arrayBuffer();
+          });
+      const narrationBuffer = await audioCtx.decodeAudioData(narrationBytes);
+
+      let musicBuffer: AudioBuffer | null = null;
+      if (musicFile) {
+        musicBuffer = await audioCtx.decodeAudioData(await musicFile.arrayBuffer());
+      }
+
+      const trimStartSec = voiceover.trimStart ?? 0;
+      const trimEndSec = voiceover.trimEnd ?? voiceover.duration;
+      const mixedBuffer = toAudioBuffer(
+        mixAudio(
+          sliceAudioWindow(narrationBuffer, trimStartSec, trimEndSec),
+          musicBuffer ? audioChannelsOf(musicBuffer) : null,
+          musicVolume,
+        ),
+        audioCtx,
+      );
+
       const dest = audioCtx.createMediaStreamDestination();
-      src.connect(dest);
-      src.connect(audioCtx.destination);
+      const source = audioCtx.createBufferSource();
+      source.buffer = mixedBuffer;
+      source.connect(dest);
+      source.connect(audioCtx.destination);
 
       // Build combined stream
       const canvasStream = canvas.captureStream(30);
@@ -712,10 +739,10 @@ function ExportTab({
         setIsExporting(false);
         setExportProgress(0);
         Object.values(renderVids).forEach(v => { v.pause(); v.remove(); });
+        audioCtx?.close();
       };
 
-      const audioTrimStart = voiceover.trimStart ?? 0;
-      const duration = (voiceover.trimEnd ?? voiceover.duration) - audioTrimStart;
+      const duration = trimEndSec - trimStartSec;
       const startWall = performance.now();
 
       let rafId: number;
@@ -725,7 +752,6 @@ function ExportTab({
 
         if (elapsed >= duration) {
           recorder.stop();
-          audioEl.pause();
           cancelAnimationFrame(rafId);
           return;
         }
@@ -758,7 +784,6 @@ function ExportTab({
 
       stopRef.current = () => {
         recorder.stop();
-        audioEl.pause();
         cancelAnimationFrame(rafId);
         Object.values(renderVids).forEach(v => { v.pause(); v.remove(); });
         setIsExporting(false);
@@ -766,12 +791,13 @@ function ExportTab({
       };
 
       recorder.start(100);
-      audioEl.currentTime = audioTrimStart;
-      audioEl.play();
+      source.start();
       rafId = requestAnimationFrame(draw);
     } catch (e) {
       console.error('Export failed:', e);
+      setExportError(e instanceof Error ? e.message : 'Export failed. Check your audio files and try again.');
       setIsExporting(false);
+      audioCtx?.close();
     }
   };
 
@@ -875,12 +901,26 @@ function ExportTab({
               <div>
                 <p className="text-sm font-semibold text-gray-900">Export Combined Video</p>
                 <p className="text-xs text-violet-500 mt-0.5">
-                  Records the aligned sequence with audio
+                  Records the aligned sequence with narration audio
                   {captionsEnabled ? ' and burned-in captions' : ''}.
                   Saves as MP4 (H.264) when supported by your browser, otherwise WebM.
                 </p>
               </div>
             </div>
+
+            <MusicPanel
+              file={musicFile}
+              volume={musicVolume}
+              disabled={isExporting}
+              onFileChange={setMusicFile}
+              onVolumeChange={setMusicVolume}
+            />
+
+            {exportError && (
+              <div className="p-2 bg-red-50 border border-red-200 rounded-lg text-xs text-red-500" role="alert">
+                {exportError}
+              </div>
+            )}
 
             <div className="space-y-2">
               <p className="text-xs font-semibold text-gray-900">Aspect Preset</p>
