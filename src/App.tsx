@@ -42,6 +42,8 @@ import { setApiKey, hasApiKey } from './services/apiKey';
 import { chainClips, rippleDeleteMany } from './utils/chainClips';
 import { resolveWordTimings, findActiveWordIndex } from './utils/wordTiming';
 import { captureFilmstrip } from './utils/clipThumbnails';
+import { estimateNarrationFlowCost, estimateTtsCost } from './services/costEstimate';
+import { CostEstimateBadge } from './components/CostEstimateBadge';
 import { motion, AnimatePresence } from 'motion/react';
 
 // Heavy Gemini export UI — code-split so it lands in its own chunk and is
@@ -250,11 +252,12 @@ function OnboardingModal({
                       <textarea value={script} onChange={e => setScript(e.target.value)}
                         placeholder="Type your narration script here..."
                         className="w-full h-28 text-sm p-3 rounded-xl border border-gray-200 bg-white resize-none focus:outline-none focus:ring-2 focus:ring-violet-300 focus:border-violet-400 text-gray-700 placeholder:text-gray-400" />
-                      <div className="flex gap-2">
+                      <div className="flex items-center gap-2">
                         <select value={selectedVoice} onChange={e => setSelectedVoice(e.target.value)}
                           className="flex-1 text-sm border border-gray-200 rounded-xl px-3 py-2.5 bg-white text-gray-700 focus:outline-none focus:ring-2 focus:ring-violet-300">
                           {VOICES.map(v => <option key={v} value={v}>{v}</option>)}
                         </select>
+                        {script.trim() && <CostEstimateBadge estimate={estimateTtsCost(script.length)} />}
                         <button onClick={handleVoiceoverAction} disabled={!script.trim() || isGenerating}
                           className="flex items-center gap-2 px-5 py-2.5 bg-violet-600 hover:bg-violet-700 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-semibold rounded-xl transition-all">
                           {isGenerating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Mic2 className="w-4 h-4" />}
@@ -265,11 +268,18 @@ function OnboardingModal({
                   )}
                   {voiceoverMethod === 'auto' && (
                     <motion.div key="auto-in" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden">
-                      <div className="flex gap-2">
+                      <div className="flex items-center gap-2">
                         <select value={selectedVoice} onChange={e => setSelectedVoice(e.target.value)}
                           className="flex-1 text-sm border border-gray-200 rounded-xl px-3 py-2.5 bg-white text-gray-700 focus:outline-none focus:ring-2 focus:ring-violet-300">
                           {VOICES.map(v => <option key={v} value={v}>{v}</option>)}
                         </select>
+                        {videoClips.length > 0 && (
+                          <CostEstimateBadge
+                            estimate={estimateNarrationFlowCost(
+                              videoClips.map(c => ({ durationSec: c.duration, analysisChars: c.analysis?.length ?? null }))
+                            )}
+                          />
+                        )}
                         <button onClick={handleVoiceoverAction} disabled={isGenerating}
                           className="flex items-center gap-2 px-5 py-2.5 bg-violet-600 hover:bg-violet-700 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-semibold rounded-xl transition-all">
                           {isGenerating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}

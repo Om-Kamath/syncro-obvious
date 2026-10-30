@@ -31,6 +31,9 @@ import { generateSRT, generateVTT, downloadTextFile, generateChaptersTxt, format
 import { listTemplates, saveTemplate, deleteTemplate, applyTemplate, loadTemplatesResult } from '../services/captionTemplates';
 import { parseCaptionFile, segmentsToTranscription } from '../utils/captionImport';
 import type { CaptionTemplate } from '../types';
+import { estimateDescriptionCost, estimateKeyMomentsCost } from '../services/costEstimate';
+import type { PostProcessingInput } from '../services/costEstimate';
+import { CostEstimateBadge } from './CostEstimateBadge';
 import { EXPORT_PRESETS, DEFAULT_EXPORT_PRESET, computeDrawGeometry, type ExportPresetId } from '../utils/exportPresets';
 import { audioChannelsOf, mixAudio, sliceAudioWindow, toAudioBuffer } from '../utils/audioMix';
 import { MusicPanel, DEFAULT_MUSIC_VOLUME } from './MusicPanel';
@@ -46,6 +49,15 @@ import {
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
+}
+
+/** Shared input-size mapping for the post-processing cost estimators. */
+function postProcessingEstimateInput(voiceover: Voiceover, videoClips: VideoClip[]): PostProcessingInput {
+  return {
+    transcriptionChars: voiceover.transcription?.length ?? 0,
+    segmentChars: voiceover.segments?.reduce((s, seg) => s + seg.text.length, 0) ?? 0,
+    analysisChars: videoClips.reduce((s, c) => s + (c.analysis?.length ?? 0), 0),
+  };
 }
 
 // ── Tab button ──────────────────────────────────────────────────────────────
@@ -190,25 +202,28 @@ export function DescriptionTab({ voiceover, videoClips }: { voiceover: Voiceover
           <p className="text-sm font-semibold text-gray-900">YouTube-Style Description</p>
           <p className="text-xs text-gray-400 mt-0.5">Auto-generated summary + chapter timestamps</p>
         </div>
-        <button
-          onClick={handleGenerate}
-          disabled={isGenerating}
-          className={cn(
-            'flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-xl transition-all',
-            isGenerating
-              ? 'bg-gray-100 text-gray-400 cursor-wait'
-              : 'bg-violet-600 text-white hover:bg-violet-700 shadow-sm shadow-violet-200'
-          )}
-        >
-          {isGenerating ? (
-            <Loader2 className="w-4 h-4 animate-spin" />
-          ) : description ? (
-            <RefreshCw className="w-4 h-4" />
-          ) : (
-            <Wand2 className="w-4 h-4" />
-          )}
-          {isGenerating ? 'Generating…' : description ? 'Regenerate' : 'Generate'}
-        </button>
+        <div className="flex items-center gap-3">
+          <CostEstimateBadge estimate={estimateDescriptionCost(postProcessingEstimateInput(voiceover, videoClips))} />
+          <button
+            onClick={handleGenerate}
+            disabled={isGenerating}
+            className={cn(
+              'flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-xl transition-all',
+              isGenerating
+                ? 'bg-gray-100 text-gray-400 cursor-wait'
+                : 'bg-violet-600 text-white hover:bg-violet-700 shadow-sm shadow-violet-200'
+            )}
+          >
+            {isGenerating ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : description ? (
+              <RefreshCw className="w-4 h-4" />
+            ) : (
+              <Wand2 className="w-4 h-4" />
+            )}
+            {isGenerating ? 'Generating…' : description ? 'Regenerate' : 'Generate'}
+          </button>
+        </div>
       </div>
 
       {error && (
@@ -751,25 +766,28 @@ export function ThumbnailsTab({
             AI finds the most compelling moments and overlays a key quote
           </p>
         </div>
-        <button
-          onClick={handleGenerate}
-          disabled={isGenerating}
-          className={cn(
-            'flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-xl transition-all',
-            isGenerating
-              ? 'bg-gray-100 text-gray-400 cursor-wait'
-              : 'bg-violet-600 text-white hover:bg-violet-700 shadow-sm shadow-violet-200'
-          )}
-        >
-          {isGenerating ? (
-            <Loader2 className="w-4 h-4 animate-spin" />
-          ) : thumbnails.length > 0 ? (
-            <RefreshCw className="w-4 h-4" />
-          ) : (
-            <Wand2 className="w-4 h-4" />
-          )}
-          {isGenerating ? 'Generating…' : thumbnails.length > 0 ? 'Regenerate' : 'Generate'}
-        </button>
+        <div className="flex items-center gap-3">
+          <CostEstimateBadge estimate={estimateKeyMomentsCost(postProcessingEstimateInput(voiceover, videoClips))} />
+          <button
+            onClick={handleGenerate}
+            disabled={isGenerating}
+            className={cn(
+              'flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-xl transition-all',
+              isGenerating
+                ? 'bg-gray-100 text-gray-400 cursor-wait'
+                : 'bg-violet-600 text-white hover:bg-violet-700 shadow-sm shadow-violet-200'
+            )}
+          >
+            {isGenerating ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : thumbnails.length > 0 ? (
+              <RefreshCw className="w-4 h-4" />
+            ) : (
+              <Wand2 className="w-4 h-4" />
+            )}
+            {isGenerating ? 'Generating…' : thumbnails.length > 0 ? 'Regenerate' : 'Generate'}
+          </button>
+        </div>
       </div>
 
       {isGenerating && progress && (
