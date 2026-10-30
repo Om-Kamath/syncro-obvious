@@ -21,7 +21,7 @@ import {
   Film,
   Trash2,
 } from 'lucide-react';
-import { VideoClip, Voiceover, CaptionStyle, CaptionMode, VideoDescription, ThumbnailCandidate } from '../types';
+import { VideoClip, Voiceover, CaptionStyle, VideoDescription, ThumbnailCandidate } from '../types';
 // Heavy export-only dependencies (Gemini post-processing, canvas frame capture) are
 // loaded on demand via dynamic import so they stay out of the initial bundle.
 // captionUtils stays static: a ~1 kB string-formatting module that render paths need
@@ -29,6 +29,7 @@ import { VideoClip, Voiceover, CaptionStyle, CaptionMode, VideoDescription, Thum
 import { normalizeErrorMessage } from '../services/geminiClient';
 import { generateSRT, generateVTT, downloadTextFile, generateChaptersTxt, formatChapterTime, type CaptionSegment } from '../utils/captionUtils';
 import { CAPTION_PRESETS, CAPTION_PRESET_ORDER, applyPreset } from '../utils/captionPresets';
+import { CaptionStyleEditor } from './CaptionStyleEditor';
 import { listTemplates, saveTemplate, deleteTemplate, applyTemplate, loadTemplatesResult } from '../services/captionTemplates';
 import { parseCaptionFile, segmentsToTranscription } from '../utils/captionImport';
 import type { CaptionTemplate } from '../types';
@@ -47,7 +48,8 @@ import {
   formatEstimatedSize,
   type QualityPresetId,
 } from '../utils/qualityPresets';
-import { drawCaptionOnCanvas } from '../utils/captionDraw';
+import { drawCaptionOnCanvas } from '../utils/captionCanvas';
+import { CaptionStyleEditor } from './CaptionStyleEditor';
 import {
   computeGifFramePlan,
   getTimelineDurationSec,
@@ -362,8 +364,6 @@ export function CaptionsTab({
   // highlighting it instead of lying about the active look.
   const updateStyle = (patch: Partial<CaptionStyle>) =>
     onStyleChange({ ...captionStyle, ...patch, preset: undefined });
-  const handleMode = (mode: CaptionMode) => updateStyle({ mode });
-  const handlePosition = (position: 'bottom' | 'top') => updateStyle({ position });
 
   // Templates load once, at initialization — no effect, no setState-in-effect.
   const [initialLoad] = useState(loadTemplatesResult);
@@ -398,11 +398,6 @@ export function CaptionsTab({
     }
   };
 
-  const modeOptions: { value: CaptionMode; label: string; desc: string }[] = [
-    { value: 'lower-third', label: 'Lower Third', desc: 'Classic bar at bottom' },
-    { value: 'word-highlight', label: 'Word Highlight', desc: 'Highlights current word' },
-    { value: 'speaker-labeled', label: 'Speaker Label', desc: 'Prefixes with "Speaker:"' },
-  ];
 
   const handleDownloadSRT = () => {
     const segments = voiceover?.segments;
@@ -505,91 +500,7 @@ export function CaptionsTab({
       </div>
 
       {/* Caption style */}
-      <div className="space-y-3">
-        <p className="text-xs font-bold uppercase tracking-widest text-gray-400">Style</p>
-        <div className="grid grid-cols-3 gap-3">
-          {modeOptions.map(opt => (
-            <button
-              key={opt.value}
-              onClick={() => handleMode(opt.value)}
-              className={cn(
-                'p-3 rounded-xl border text-left transition-all',
-                captionStyle.mode === opt.value
-                  ? 'border-violet-500 bg-violet-50 ring-1 ring-violet-300'
-                  : 'border-gray-200 hover:border-gray-300 bg-gray-50'
-              )}
-            >
-              <p className="text-xs font-semibold text-gray-900">{opt.label}</p>
-              <p className="text-[10px] text-gray-400 mt-0.5">{opt.desc}</p>
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* Font size */}
-      <div className="space-y-2">
-        <div className="flex items-center justify-between">
-          <p className="text-xs font-bold uppercase tracking-widest text-gray-400">Font Size</p>
-          <span className="text-xs font-mono font-semibold text-gray-600">{captionStyle.fontSize}px</span>
-        </div>
-        <input
-          type="range"
-          min={12}
-          max={36}
-          value={captionStyle.fontSize}
-          onChange={e => updateStyle({ fontSize: Number(e.target.value) })}
-          className="w-full h-1.5 bg-gray-200 rounded-full appearance-none cursor-pointer accent-violet-600"
-        />
-      </div>
-
-      {/* Colors */}
-      <div className="grid grid-cols-2 gap-4">
-        <div className="space-y-2">
-          <p className="text-xs font-bold uppercase tracking-widest text-gray-400">Text Color</p>
-          <div className="flex items-center gap-3 p-2.5 bg-gray-50 border border-gray-100 rounded-xl">
-            <input
-              type="color"
-              value={captionStyle.color}
-              onChange={e => updateStyle({ color: e.target.value })}
-              className="w-8 h-8 rounded-lg border-0 cursor-pointer bg-transparent"
-            />
-            <span className="text-xs font-mono text-gray-500">{captionStyle.color}</span>
-          </div>
-        </div>
-        <div className="space-y-2">
-          <p className="text-xs font-bold uppercase tracking-widest text-gray-400">Background</p>
-          <div className="flex items-center gap-3 p-2.5 bg-gray-50 border border-gray-100 rounded-xl">
-            <input
-              type="color"
-              value={captionStyle.bgColor}
-              onChange={e => updateStyle({ bgColor: e.target.value })}
-              className="w-8 h-8 rounded-lg border-0 cursor-pointer bg-transparent"
-            />
-            <span className="text-xs font-mono text-gray-500">{captionStyle.bgColor}</span>
-          </div>
-        </div>
-      </div>
-
-      {/* Position */}
-      <div className="space-y-2">
-        <p className="text-xs font-bold uppercase tracking-widest text-violet-500">Position</p>
-        <div className="flex gap-3">
-          {(['bottom', 'top'] as const).map(pos => (
-            <button
-              key={pos}
-              onClick={() => handlePosition(pos)}
-              className={cn(
-                'flex-1 py-2 text-xs font-semibold rounded-xl border capitalize transition-all',
-                captionStyle.position === pos
-                  ? 'border-violet-400 bg-violet-50 text-violet-600'
-                  : 'border-gray-200 bg-gray-50 text-violet-500 hover:border-violet-400'
-              )}
-            >
-              {pos}
-            </button>
-          ))}
-        </div>
-      </div>
+      <CaptionStyleEditor style={captionStyle} onChange={updateStyle} />
 
       {/* Templates */}
       <div className="space-y-2">
@@ -1523,6 +1434,8 @@ function ExportTab({
       </div>
     </div>
   );
+}
+
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
