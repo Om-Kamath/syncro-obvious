@@ -350,7 +350,7 @@ export default function App() {
       setVoiceover({ url: result.url, duration: result.duration, transcription: result.transcription });
     } catch (err) {
       console.error('TTS generation failed:', err);
-      alert('Failed to generate audio. Please try again.');
+      alert(`Failed to generate audio: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       setIsGeneratingAudio(false);
     }
@@ -371,7 +371,7 @@ export default function App() {
       setVoiceover({ url: result.url, duration: result.duration, transcription: result.transcription });
     } catch (err) {
       console.error('Narration generation failed:', err);
-      alert('Failed to generate narration. Please try again.');
+      alert(`Failed to generate narration: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       setIsGeneratingAudio(false);
     }

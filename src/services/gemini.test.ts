@@ -1,5 +1,210 @@
-import { describe, it, expect } from 'vitest';
-import { estimateSegments } from './gemini';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+
+const { generateContentMock } = vi.hoisted(() => ({ generateContentMock: vi.fn() }));
+
+vi.mock('@google/genai', () => ({
+  GoogleGenAI: class {
+    models = { generateContent: generateContentMock };
+    files = {
+      upload: vi.fn(),
+      get: vi.fn(),
+    };
+  },
+  Type: {
+    OBJECT: 'OBJECT',
+    ARRAY: 'ARRAY',
+    STRING: 'STRING',
+    NUMBER: 'NUMBER',
+  },
+  FileState: {
+    PROCESSING: 'PROCESSING',
+    FAILED: 'FAILED',
+    ACTIVE: 'ACTIVE',
+  },
+}));
+
+vi.mock('./apiKey', () => ({
+  getApiKey: () => 'test-key',
+}));
+
+import { generateAudioFromScript, generateNarrationFromVideos, inlineAudioToWavBytes, pcmBase64ToWavBytes, estimateSegments } from './gemini';
+import { MODELS } from './models';
+
+const toB64 = (bytes: Uint8Array) => btoa(String.fromCharCode(...bytes));
+const fromB64 = (b64: string) => Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+
+function audioPart(inlineData: { data: string; mimeType?: string } | undefined) {
+  return {
+    candidates: [{ content: { parts: [{ inlineData }] } }],
+  };
+}
+
+// The module measures duration with `new Audio(url)`; stub a metadata load.
+vi.stubGlobal('Audio', class {
+  duration = 1.5;
+  onloadedmetadata: (() => void) | null = null;
+  onerror: (() => void) | null = null;
+  constructor() {
+    setTimeout(() => this.onloadedmetadata?.(), 0);
+  }
+});
+
+let capturedBlob: Blob | null = null;
+const originalCreateObjectURL = URL.createObjectURL;
+const originalRevokeObjectURL = URL.revokeObjectURL;
+
+beforeEach(() => {
+  generateContentMock.mockReset();
+  capturedBlob = null;
+  URL.createObjectURL = vi.fn((blob: Blob) => {
+    capturedBlob = blob;
+    return 'blob:mock-url';
+  }) as unknown as typeof URL.createObjectURL;
+  URL.revokeObjectURL = vi.fn();
+});
+
+afterEach(() => {
+  URL.createObjectURL = originalCreateObjectURL;
+  URL.revokeObjectURL = originalRevokeObjectURL;
+});
+
+describe('MODELS registry', () => {
+  it('pins the current GA model ids', () => {
+    expect(MODELS.tts).toBe('gemini-3.8-flash-tts');
+    expect(MODELS.flashLite).toBe('gemini-3.5-flash-lite');
+    expect(MODELS.flash).toBe('gemini-3.8-flash');
+  });
+
+  it('no longer references the shutting-down 2.5 preview TTS or 2.5 flash-lite', () => {
+    const values = Object.values(MODELS).join(' ');
+    expect(values).not.toContain('gemini-2.5-flash-preview-tts');
+    expect(values).not.toContain('gemini-2.5-flash-lite');
+    expect(values).not.toContain('gemini-3-flash-preview');
+  });
+});
+
+describe('pcmBase64ToWavBytes', () => {
+  it('wraps raw PCM in a 44-byte WAV header', () => {
+    const pcm = Uint8Array.from([10, 20, 30, 40]);
+    const wav = pcmBase64ToWavBytes(toB64(pcm));
+
+    expect(wav.length).toBe(44 + pcm.length);
+    expect(String.fromCharCode(...wav.slice(0, 4))).toBe('RIFF');
+    expect(String.fromCharCode(...wav.slice(8, 12))).toBe('WAVE');
+    // little-endian data-size field at offset 40
+    expect(new DataView(wav.buffer).getUint32(40, true)).toBe(pcm.length);
+    expect([...wav.slice(44)]).toEqual([...pcm]);
+  });
+});
+
+describe('inlineAudioToWavBytes', () => {
+  it('passes WAV responses through untouched (no double header)', () => {
+    const wavBytes = Uint8Array.from([1, 2, 3, 4]);
+    const out = inlineAudioToWavBytes(toB64(wavBytes), 'audio/wav');
+    expect([...out]).toEqual([...wavBytes]);
+  });
+
+  it('routes mimeType case-insensitively', () => {
+    const wavBytes = Uint8Array.from([1, 2, 3, 4]);
+    const out = inlineAudioToWavBytes(toB64(wavBytes), 'AUDIO/WAV');
+    expect([...out]).toEqual([...wavBytes]);
+  });
+
+  it('wraps raw PCM responses (legacy audio/L16) in a WAV header', () => {
+    const pcm = Uint8Array.from([10, 20, 30]);
+    const out = inlineAudioToWavBytes(toB64(pcm), 'audio/L16;codec=pcm;rate=24000');
+
+    expect(out.length).toBe(44 + pcm.length);
+    expect(String.fromCharCode(...out.slice(0, 4))).toBe('RIFF');
+    expect([...out.slice(44)]).toEqual([...pcm]);
+  });
+
+  it('treats a missing mimeType as raw PCM (2.5 preview behavior)', () => {
+    const pcm = Uint8Array.from([7, 8]);
+    const out = inlineAudioToWavBytes(toB64(pcm), undefined);
+    expect(out.length).toBe(44 + pcm.length);
+    expect(String.fromCharCode(...out.slice(0, 4))).toBe('RIFF');
+  });
+});
+
+describe('generateAudioFromScript', () => {
+  it('calls the GA TTS model with the documented request shape', async () => {
+    generateContentMock.mockResolvedValue(
+      audioPart({ data: toB64(Uint8Array.from([1, 2, 3])), mimeType: 'audio/wav' })
+    );
+
+    await generateAudioFromScript('Hello world', 'Kore');
+
+    expect(generateContentMock).toHaveBeenCalledTimes(1);
+    const call = generateContentMock.mock.calls[0][0];
+    expect(call.model).toBe('gemini-3.8-flash-tts');
+    expect(call.config.responseModalities).toEqual(['AUDIO']);
+    expect(call.config.speechConfig.voiceConfig.prebuiltVoiceConfig.voiceName).toBe('Kore');
+  });
+
+  it('creates the audio blob from WAV responses without re-wrapping', async () => {
+    const wavBytes = Uint8Array.from([1, 2, 3, 4]);
+    generateContentMock.mockResolvedValue(
+      audioPart({ data: toB64(wavBytes), mimeType: 'audio/wav' })
+    );
+
+    const result = await generateAudioFromScript('Hello world');
+
+    expect(result.url).toBe('blob:mock-url');
+    expect(result.transcription).toBe('Hello world');
+    expect(result.duration).toBe(1.5);
+    expect(capturedBlob?.type).toBe('audio/wav');
+    expect([...new Uint8Array(await capturedBlob!.arrayBuffer())]).toEqual([...wavBytes]);
+  });
+
+  it('wraps legacy raw PCM responses in a WAV header', async () => {
+    const pcm = Uint8Array.from([10, 20, 30]);
+    generateContentMock.mockResolvedValue(
+      audioPart({ data: toB64(pcm), mimeType: 'audio/L16;codec=pcm;rate=24000' })
+    );
+
+    await generateAudioFromScript('Hello world');
+
+    const bytes = [...new Uint8Array(await capturedBlob!.arrayBuffer())];
+    expect(bytes.length).toBe(44 + pcm.length);
+    expect(String.fromCharCode(...bytes.slice(0, 4))).toBe('RIFF');
+    expect(bytes.slice(44)).toEqual([...pcm]);
+  });
+
+  it('throws (and logs) when no audio is returned', async () => {
+    generateContentMock.mockResolvedValue({ candidates: [] });
+    await expect(generateAudioFromScript('Hello world')).rejects.toThrow(/No audio returned/i);
+  });
+
+  it('propagates SDK errors with their original message', async () => {
+    generateContentMock.mockRejectedValue(new Error('404: model not found'));
+    await expect(generateAudioFromScript('Hello world')).rejects.toThrow('404: model not found');
+  });
+});
+
+describe('generateNarrationFromVideos', () => {
+  it('writes the script with flash-lite, then speaks it with the TTS model', async () => {
+    generateContentMock
+      .mockResolvedValueOnce({ text: 'A narration script.' })
+      .mockResolvedValueOnce(audioPart({ data: toB64(Uint8Array.from([1, 2, 3])), mimeType: 'audio/wav' }));
+
+    const result = await generateNarrationFromVideos([
+      { name: 'clip.mp4', analysis: 'a beach', duration: 10 },
+    ]);
+
+    expect(generateContentMock).toHaveBeenCalledTimes(2);
+    expect(generateContentMock.mock.calls[0][0].model).toBe('gemini-3.5-flash-lite');
+    expect(generateContentMock.mock.calls[1][0].model).toBe('gemini-3.8-flash-tts');
+    expect(result.transcription).toBe('A narration script.');
+  });
+});
+
+describe('fromB64 round-trip (test helper)', () => {
+  it('decodes what toB64 encodes', () => {
+    const bytes = Uint8Array.from([0, 1, 254, 255]);
+    expect([...fromB64(toB64(bytes))]).toEqual([...bytes]);
+  });
+});
 
 // Regex-driven regression tests for the sentence split + char-proportional
 // duration distribution. These guard the fallback caption-timing math —
