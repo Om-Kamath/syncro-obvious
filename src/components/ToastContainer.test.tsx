@@ -2,7 +2,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, cleanup, fireEvent, act } from '@testing-library/react';
 import { ToastContainer } from './ToastContainer';
-import { toast, clearToasts, DEFAULT_TOAST_DURATION_MS } from '../services/toastStore';
+import { toast, clearToasts, DEFAULT_TOAST_DURATION_MS, MAX_VISIBLE_TOASTS } from '../services/toastStore';
 
 describe('ToastContainer', () => {
   afterEach(() => {
@@ -47,5 +47,18 @@ describe('ToastContainer', () => {
       vi.advanceTimersByTime(DEFAULT_TOAST_DURATION_MS);
     });
     expect(screen.queryByText('Temporary')).toBeNull();
+  });
+
+  it('renders at most MAX_VISIBLE_TOASTS toasts, evicting the oldest', () => {
+    render(<ToastContainer />);
+    act(() => {
+      toast.error('First failure');
+      toast.error('Second failure');
+      toast.error('Third failure');
+      toast.error('Fourth failure'); // over the cap — 'First failure' must go
+    });
+    expect(screen.getAllByRole('alert')).toHaveLength(MAX_VISIBLE_TOASTS);
+    expect(screen.queryByText('First failure')).toBeNull();
+    expect(screen.getByText('Fourth failure')).toBeTruthy();
   });
 });

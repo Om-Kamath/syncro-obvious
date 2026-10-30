@@ -6,6 +6,7 @@ import {
   subscribe,
   toast,
   DEFAULT_TOAST_DURATION_MS,
+  MAX_VISIBLE_TOASTS,
   type Toast,
 } from './toastStore';
 
@@ -73,6 +74,41 @@ describe('toastStore', () => {
     const info = pushToast('info', 'Done');
     const error = pushToast('error', 'Done');
     expect(last()).toEqual([error, info]);
+  });
+
+  it('caps the visible stack at MAX_VISIBLE_TOASTS, dropping the oldest', () => {
+    const first = pushToast('error', 'First failure');
+    pushToast('error', 'Second failure');
+    pushToast('error', 'Third failure');
+    const fourth = pushToast('error', 'Fourth failure');
+
+    expect(last()).toHaveLength(MAX_VISIBLE_TOASTS);
+    expect(last()).toEqual([fourth, expect.anything(), expect.anything()]);
+    expect(last().map(t => t.id)).not.toContain(first.id);
+  });
+
+  it('cancels the evicted toast\u2019s expiry timer so only visible toasts hold timers', () => {
+    pushToast('info', 'Evicted', 10_000);
+    pushToast('info', 'Two', 10_000);
+    pushToast('info', 'Three', 10_000);
+    pushToast('info', 'Four', 10_000); // evicts 'Evicted'
+    expect(last()).toHaveLength(MAX_VISIBLE_TOASTS);
+    expect(vi.getTimerCount()).toBe(MAX_VISIBLE_TOASTS); // no leaked timer for the evicted toast
+
+    vi.advanceTimersByTime(10_000); // visible toasts expire normally…
+    expect(last()).toHaveLength(0);
+    vi.advanceTimersByTime(10_000); // …and the evicted toast never resurrects
+    expect(last()).toHaveLength(0);
+  });
+
+  it('deduping a visible toast does not evict anything', () => {
+    pushToast('info', 'One');
+    pushToast('info', 'Two');
+    pushToast('info', 'Three');
+    pushToast('info', 'One'); // dedupe path — no new toast, no eviction
+
+    expect(last()).toHaveLength(MAX_VISIBLE_TOASTS);
+    expect(last().map(t => t.message)).toEqual(['Three', 'Two', 'One']); // order unchanged by the dedupe re-push
   });
 
   it('restarts the expiry clock on a deduped re-push', () => {
