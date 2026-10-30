@@ -154,7 +154,7 @@ function OnboardingModal({
         animate={{ opacity: 1, scale: 1, y: 0 }}
         exit={{ opacity: 0, scale: 0.97, y: 8 }}
         transition={{ type: 'spring', damping: 28, stiffness: 380 }}
-        className="bg-white rounded-3xl shadow-2xl w-full max-w-xl mx-4 overflow-hidden"
+        className="bg-white rounded-3xl shadow-2xl w-full max-w-xl mx-4 max-h-[calc(100vh-2rem)] overflow-y-auto"
       >
         <div className="px-8 pt-8 pb-6 border-b border-gray-100">
           <div className="flex items-center gap-3">
@@ -189,7 +189,7 @@ function OnboardingModal({
                 </div>
                 <FileUploader label="Add Videos" accept={{ 'video/*': ['.mp4', '.mov', '.webm'] }} onFilesAdded={onVideoUpload} onRejected={onUploadRejected} icon={<Upload className="w-6 h-6" />} />
                 {videoClips.length > 0 && (
-                  <div className="space-y-2 max-h-52 overflow-y-auto">
+                  <div className="space-y-2">
                     {videoClips.map(clip => (
                       <div key={clip.id} className="flex items-center gap-3 p-3 bg-gray-50 rounded-xl border border-gray-100">
                         <div className="w-10 h-10 bg-gray-200 rounded-lg overflow-hidden shrink-0">
@@ -698,7 +698,7 @@ export default function App() {
                     </button>
                   </div>
                   {voiceover.transcription && (
-                    <div className="p-3 bg-gray-50 rounded-xl text-[11px] text-gray-500 leading-relaxed max-h-28 overflow-y-auto border border-gray-100">
+                    <div className="p-3 bg-gray-50 rounded-xl text-[11px] text-gray-500 leading-relaxed border border-gray-100">
                       <span className="font-bold text-gray-300 uppercase text-[9px] block mb-1">Transcript</span>
                       {voiceover.transcription}
                     </div>
