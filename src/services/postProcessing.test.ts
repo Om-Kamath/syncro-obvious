@@ -18,7 +18,14 @@ vi.mock('./apiKey', () => ({
   getApiKey: () => 'test-key',
 }));
 
-import { generateDescription, identifyKeyMoments, parseModelJson } from './postProcessing';
+import {
+  generateDescription,
+  generateTitleVariants,
+  identifyKeyMoments,
+  parseModelJson,
+  TITLE_ANGLES,
+  validateTitleVariants,
+} from './postProcessing';
 import { subscribe } from './logger';
 import type { LogEntry } from './logger';
 import { MODELS } from './models';
@@ -148,5 +155,122 @@ describe('logging', () => {
     ).rejects.toThrow('API error: quota exceeded');
     expect(collected[0]).toMatchObject({ fn: 'Generate Description', status: 'error' });
     expect(collected[0].error).toBe('API error: quota exceeded');
+  });
+});
+
+describe('generateTitleVariants', () => {
+  beforeEach(() => {
+    generateContentMock.mockReset();
+  });
+
+  const validVariants = [
+    { angle: 'how-to', title: 'How to Edit Videos Faster' },
+    { angle: 'listicle', title: '5 Editing Tricks Pros Swear By' },
+    { angle: 'question', title: 'Why Do Your Edits Feel Slow?' },
+    { angle: 'bold-claim', title: 'This Workflow Doubles Your Output' },
+    { angle: 'curiosity', title: 'The Edit Nobody Notices' },
+  ];
+
+  it('returns 5 distinct non-empty titles from a valid model response', async () => {
+    generateContentMock.mockResolvedValue({ text: JSON.stringify(validVariants) });
+
+    const result = await generateTitleVariants(noopTranscription, noopSegments, noopAnalyses);
+
+    expect(result).toHaveLength(5);
+    const titles = result.map(v => v.title);
+    expect(titles.every(t => t.length > 0)).toBe(true);
+    expect(new Set(titles).size).toBe(5);
+    expect(new Set(result.map(v => v.angle)).size).toBe(5);
+    expect(result).toEqual(validVariants);
+  });
+
+  it('trims title whitespace and parses whitespace-padded JSON', async () => {
+    generateContentMock.mockResolvedValue({
+      text: `  ${JSON.stringify(validVariants.map(v => ({ ...v, title: `  ${v.title}  ` })))}  `,
+    });
+
+    const result = await generateTitleVariants(noopTranscription, noopSegments, noopAnalyses);
+
+    expect(result.map(v => v.title)).toEqual([
+      'How to Edit Videos Faster',
+      '5 Editing Tricks Pros Swear By',
+      'Why Do Your Edits Feel Slow?',
+      'This Workflow Doubles Your Output',
+      'The Edit Nobody Notices',
+    ]);
+  });
+
+  it('raises with call context on malformed JSON', async () => {
+    generateContentMock.mockResolvedValue({ text: 'not an array' });
+    await expect(generateTitleVariants(noopTranscription, noopSegments, noopAnalyses)).rejects.toThrow(
+      /Title variant generation: Gemini returned malformed JSON/i
+    );
+  });
+
+  it('raises on an empty response', async () => {
+    generateContentMock.mockResolvedValue({ text: '' });
+    await expect(generateTitleVariants(noopTranscription, noopSegments, noopAnalyses)).rejects.toThrow(
+      /Title variant generation: Gemini returned an empty response/i
+    );
+  });
+
+  it('propagates Gemini call failures unwrapped', async () => {
+    generateContentMock.mockRejectedValue(new Error('API error: quota exceeded'));
+    await expect(generateTitleVariants(noopTranscription, noopSegments, noopAnalyses)).rejects.toThrow(
+      'API error: quota exceeded'
+    );
+  });
+});
+
+describe('validateTitleVariants', () => {
+  const validVariants = [
+    { angle: 'how-to', title: 'A' },
+    { angle: 'listicle', title: 'B' },
+    { angle: 'question', title: 'C' },
+    { angle: 'bold-claim', title: 'D' },
+    { angle: 'curiosity', title: 'E' },
+  ];
+
+  it('accepts the five distinct angles and returns trimmed copies', () => {
+    const result = validateTitleVariants(validVariants.map(v => ({ ...v, title: `  ${v.title} ` })));
+    expect(result.map(v => v.title)).toEqual(['A', 'B', 'C', 'D', 'E']);
+  });
+
+  it('rejects the wrong number of variants', () => {
+    expect(() => validateTitleVariants(validVariants.slice(0, 4))).toThrow(/expected exactly 5/);
+    expect(() => validateTitleVariants([...validVariants, { angle: 'how-to', title: 'F' }])).toThrow(
+      /expected exactly 5/
+    );
+    expect(() => validateTitleVariants('nope')).toThrow(/expected exactly 5.*non-array/);
+  });
+
+  it('rejects an unknown angle', () => {
+    const bad = validVariants.map(v => ({ ...v }));
+    bad[2] = { angle: 'clickbait', title: 'C' };
+    expect(() => validateTitleVariants(bad)).toThrow(/unknown angle "clickbait"/);
+  });
+
+  it('rejects a repeated angle', () => {
+    const bad = validVariants.map(v => ({ ...v }));
+    bad[1] = { angle: 'how-to', title: 'B' };
+    expect(() => validateTitleVariants(bad)).toThrow(/angle "how-to" appears more than once/);
+  });
+
+  it('rejects an empty or missing title', () => {
+    const bad = validVariants.map(v => ({ ...v }));
+    bad[3] = { angle: 'bold-claim', title: '   ' };
+    expect(() => validateTitleVariants(bad)).toThrow(/missing a non-empty title/);
+    const missing = validVariants.map(v => ({ angle: v.angle, title: undefined }));
+    expect(() => validateTitleVariants(missing)).toThrow(/missing a non-empty title/);
+  });
+
+  it('rejects duplicate title text across angles (case-insensitive)', () => {
+    const bad = validVariants.map(v => ({ ...v }));
+    bad[1] = { angle: 'listicle', title: 'a' };
+    expect(() => validateTitleVariants(bad)).toThrow(/duplicate title/);
+  });
+
+  it('exposes exactly the five canonical angles', () => {
+    expect([...TITLE_ANGLES]).toEqual(['how-to', 'listicle', 'question', 'bold-claim', 'curiosity']);
   });
 });

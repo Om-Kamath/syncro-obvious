@@ -29,7 +29,13 @@ vi.mock('./apiKey', () => ({
   getApiKey: getApiKeyMock,
 }));
 
-import { generateDescription, identifyKeyMoments, parseModelJson } from './postProcessing';
+import {
+  generateDescription,
+  generateTitleVariants,
+  identifyKeyMoments,
+  parseModelJson,
+  TITLE_ANGLES,
+} from './postProcessing';
 
 const transcription = 'We hiked the ridge at dawn and found an abandoned cabin.';
 const segments = [
@@ -267,5 +273,71 @@ describe('error paths', () => {
     await expect(identifyKeyMoments(transcription, segments, analyses)).rejects.toThrow(
       'API error: quota exceeded'
     );
+  });
+});
+
+describe('generateTitleVariants prompt building', () => {
+  // A valid five-variant response: the validator rejects anything else, so
+  // prompt-shape probes must satisfy the contract to reach a resolution.
+  const fixture = [
+    { angle: 'how-to', title: 'How to Hike a Ridge at Dawn' },
+    { angle: 'listicle', title: '5 Reasons the Cabin Was Abandoned' },
+    { angle: 'question', title: 'What Was Inside the Cabin?' },
+    { angle: 'bold-claim', title: 'The Best Dawn Hike on the Ridge' },
+    { angle: 'curiosity', title: 'We Found Something at Sunrise' },
+  ];
+  const validResponse = () => ({ text: JSON.stringify(fixture) });
+
+  it('embeds the transcription, serialized segments, analyses, and all five angle names in the prompt', async () => {
+    generateContentMock.mockResolvedValue(validResponse());
+    await generateTitleVariants(transcription, segments, analyses);
+
+    const { contents } = lastCall();
+    expect(contents).toContain(transcription);
+    expect(contents).toContain(JSON.stringify(segments));
+    expect(contents).toContain(analyses.join(' | '));
+    for (const angle of TITLE_ANGLES) {
+      expect(contents).toContain(angle);
+    }
+  });
+
+  it('pins the grounding, length, and anti-bait rules in the prompt text', async () => {
+    generateContentMock.mockResolvedValue(validResponse());
+    await generateTitleVariants(transcription, segments, analyses);
+
+    const { contents } = lastCall();
+    expect(contents).toMatch(/exactly 5/i);
+    expect(contents).toMatch(/Max 70 characters/i);
+    expect(contents).toMatch(/never invent claims/i);
+  });
+
+  it('requests an ARRAY schema whose items require an enum-constrained angle and a title', async () => {
+    generateContentMock.mockResolvedValue(validResponse());
+    await generateTitleVariants(transcription, segments, analyses);
+
+    const { config } = lastCall();
+    expect(config.responseMimeType).toBe('application/json');
+    const schema = config.responseSchema as {
+      type: string;
+      items: {
+        type: string;
+        required: string[];
+        properties: Record<string, { type: string; enum?: string[] }>;
+      };
+    };
+    expect(schema.type).toBe('ARRAY');
+    expect(schema.items.type).toBe('OBJECT');
+    expect(schema.items.required).toEqual(['angle', 'title']);
+    expect(schema.items.properties.angle.type).toBe('STRING');
+    expect(schema.items.properties.angle.enum).toEqual([...TITLE_ANGLES]);
+    expect(schema.items.properties.title.type).toBe('STRING');
+  });
+
+  it('throws before calling Gemini when no API key is set', async () => {
+    getApiKeyMock.mockReturnValue('');
+    await expect(generateTitleVariants(transcription, segments, analyses)).rejects.toThrow(
+      /No Gemini API key set/
+    );
+    expect(generateContentMock).not.toHaveBeenCalled();
   });
 });

@@ -19,8 +19,8 @@ import {
   Hash,
   Film,
 } from 'lucide-react';
-import { VideoClip, Voiceover, CaptionStyle, CaptionMode, VideoDescription, ThumbnailCandidate } from '../types';
-import { generateDescription, identifyKeyMoments } from '../services/postProcessing';
+import { VideoClip, Voiceover, CaptionStyle, CaptionMode, VideoDescription, ThumbnailCandidate, TitleVariant } from '../types';
+import { generateDescription, generateTitleVariants, identifyKeyMoments } from '../services/postProcessing';
 import { normalizeErrorMessage } from '../services/geminiClient';
 import { generateSRT, generateVTT, downloadTextFile } from '../utils/captionUtils';
 import { captureVideoFrame, addQuoteOverlay, downloadDataUrl, downloadFile, getClipAtTime } from '../utils/exportUtils';
@@ -118,11 +118,22 @@ function CopyButton({ text, className }: { text: string; className?: string }) {
 // ═══════════════════════════════════════════════════════════════════════════
 // TAB 1 — Description & Chapters
 // ═══════════════════════════════════════════════════════════════════════════
+const TITLE_ANGLE_LABELS: Record<TitleVariant['angle'], string> = {
+  'how-to': 'How-to',
+  listicle: 'Listicle',
+  question: 'Question',
+  'bold-claim': 'Bold claim',
+  curiosity: 'Curiosity',
+};
+
 export function DescriptionTab({ voiceover, videoClips }: { voiceover: Voiceover; videoClips: VideoClip[] }) {
   const [description, setDescription] = useState<VideoDescription | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
   const [error, setError] = useState('');
   const [showHashtags, setShowHashtags] = useState(false);
+  const [titleVariants, setTitleVariants] = useState<TitleVariant[] | null>(null);
+  const [isGeneratingTitles, setIsGeneratingTitles] = useState(false);
+  const [titlesError, setTitlesError] = useState('');
 
   const canGenerate = !!voiceover.transcription && !!voiceover.segments?.length;
 
@@ -143,6 +154,24 @@ export function DescriptionTab({ voiceover, videoClips }: { voiceover: Voiceover
       setError(normalizeErrorMessage(err));
     } finally {
       setIsGenerating(false);
+    }
+  };
+
+  const handleGenerateTitles = async () => {
+    if (!voiceover.transcription || !voiceover.segments) return;
+    setIsGeneratingTitles(true);
+    setTitlesError('');
+    try {
+      const result = await generateTitleVariants(
+        voiceover.transcription,
+        voiceover.segments,
+        videoClips.map(c => c.analysis || '').filter(Boolean)
+      );
+      setTitleVariants(result);
+    } catch {
+      setTitlesError('Failed to generate title variants. Please try again.');
+    } finally {
+      setIsGeneratingTitles(false);
     }
   };
 
@@ -198,6 +227,60 @@ export function DescriptionTab({ voiceover, videoClips }: { voiceover: Voiceover
           {error}
         </div>
       )}
+
+      {/* Title variants — five angles, one title each */}
+      <div className="bg-gray-50 border border-gray-100 rounded-2xl p-4 space-y-3">
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400">Title Variants</p>
+            <p className="text-xs text-gray-400 mt-0.5">5 angles: how-to, listicle, question, bold-claim, curiosity</p>
+          </div>
+          <button
+            onClick={handleGenerateTitles}
+            disabled={isGeneratingTitles}
+            className={cn(
+              'flex items-center gap-2 px-3 py-1.5 text-xs font-semibold rounded-lg transition-all',
+              isGeneratingTitles
+                ? 'bg-gray-200 text-gray-400 cursor-wait'
+                : 'bg-white text-violet-600 border border-violet-600/30 hover:bg-violet-50'
+            )}
+          >
+            {isGeneratingTitles ? (
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            ) : titleVariants ? (
+              <RefreshCw className="w-3.5 h-3.5" />
+            ) : (
+              <Wand2 className="w-3.5 h-3.5" />
+            )}
+            {isGeneratingTitles ? 'Generating titles…' : titleVariants ? 'Regenerate titles' : 'Generate titles'}
+          </button>
+        </div>
+
+        {titlesError && (
+          <div className="text-xs text-red-400 bg-red-950/30 border border-red-900/30 rounded-xl px-3 py-2">
+            {titlesError}
+          </div>
+        )}
+
+        {titleVariants && (
+          <div className="space-y-1.5">
+            {titleVariants.map(v => (
+              <div
+                key={v.angle}
+                className="flex items-center justify-between gap-3 bg-white border border-gray-100 rounded-xl px-3 py-2"
+              >
+                <div className="flex items-center gap-3 min-w-0">
+                  <span className="px-2 py-0.5 bg-violet-50 text-violet-600 text-[10px] font-bold uppercase tracking-wide rounded-md border border-violet-600/20 flex-shrink-0 w-20 text-center">
+                    {TITLE_ANGLE_LABELS[v.angle]}
+                  </span>
+                  <p className="text-sm text-gray-700 truncate">{v.title}</p>
+                </div>
+                <CopyButton text={v.title} />
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
 
       <AnimatePresence>
         {description && (
