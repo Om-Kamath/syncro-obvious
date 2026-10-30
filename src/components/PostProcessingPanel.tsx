@@ -24,6 +24,7 @@ import { generateDescription, identifyKeyMoments } from '../services/postProcess
 import { generateSRT, generateVTT, downloadTextFile } from '../utils/captionUtils';
 import { captureVideoFrame, addQuoteOverlay, downloadDataUrl, downloadFile, getClipAtTime } from '../utils/exportUtils';
 import { EXPORT_PRESETS, DEFAULT_EXPORT_PRESET, computeDrawGeometry, type ExportPresetId } from '../utils/exportPresets';
+import { PLATFORM_PRESETS, DEFAULT_PLATFORM_PRESET, supportsChapters, type PlatformId } from '../utils/platformPresets';
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -118,12 +119,24 @@ function CopyButton({ text, className }: { text: string; className?: string }) {
 // TAB 1 — Description & Chapters
 // ═══════════════════════════════════════════════════════════════════════════
 function DescriptionTab({ voiceover, videoClips }: { voiceover: Voiceover; videoClips: VideoClip[] }) {
+  const [platform, setPlatform] = useState<PlatformId>(DEFAULT_PLATFORM_PRESET);
   const [description, setDescription] = useState<VideoDescription | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
   const [error, setError] = useState('');
   const [showHashtags, setShowHashtags] = useState(false);
 
+  const preset = PLATFORM_PRESETS[platform];
+  const withChapters = supportsChapters(preset);
   const canGenerate = !!voiceover.transcription && !!voiceover.segments?.length;
+
+  // The shown copy must match the selected platform, so switching clears the
+  // previous generation instead of leaving stale copy on screen.
+  const handlePlatform = (id: PlatformId) => {
+    if (id === platform) return;
+    setPlatform(id);
+    setDescription(null);
+    setError('');
+  };
 
   const handleGenerate = async () => {
     if (!voiceover.transcription || !voiceover.segments) return;
@@ -133,7 +146,8 @@ function DescriptionTab({ voiceover, videoClips }: { voiceover: Voiceover; video
       const result = await generateDescription(
         voiceover.transcription,
         voiceover.segments,
-        videoClips.map(c => c.analysis || '').filter(Boolean)
+        videoClips.map(c => c.analysis || '').filter(Boolean),
+        platform
       );
       setDescription(result);
     } catch {
@@ -147,11 +161,15 @@ function DescriptionTab({ voiceover, videoClips }: { voiceover: Voiceover; video
     ? [
         description.summary,
         '',
-        '━━━━━━━━━━━━━━━━━━━━',
-        'CHAPTERS',
-        '━━━━━━━━━━━━━━━━━━━━',
-        ...description.chapters.map(c => `${formatTimestamp(c.time)} ${c.label}`),
-        '',
+        ...(withChapters
+          ? [
+              '━━━━━━━━━━━━━━━━━━━━',
+              'CHAPTERS',
+              '━━━━━━━━━━━━━━━━━━━━',
+              ...description.chapters.map(c => `${formatTimestamp(c.time)} ${c.label}`),
+              '',
+            ]
+          : []),
         description.hashtags.map(h => `#${h}`).join(' '),
       ].join('\n')
     : '';
@@ -164,10 +182,34 @@ function DescriptionTab({ voiceover, videoClips }: { voiceover: Voiceover; video
 
   return (
     <div className="space-y-5">
+      <div className="space-y-2">
+        <p className="text-xs font-bold uppercase tracking-widest text-gray-400">Platform</p>
+        <div className="grid grid-cols-2 gap-2">
+          {Object.values(PLATFORM_PRESETS).map(opt => (
+            <button
+              key={opt.id}
+              onClick={() => handlePlatform(opt.id)}
+              aria-pressed={platform === opt.id}
+              className={cn(
+                'p-3 rounded-xl border text-left transition-all',
+                platform === opt.id
+                  ? 'border-violet-500 bg-violet-50 ring-1 ring-violet-300'
+                  : 'border-gray-200 hover:border-gray-300 bg-gray-50'
+              )}
+            >
+              <p className="text-xs font-semibold text-gray-900">{opt.label}</p>
+              <p className="text-[10px] text-gray-400 mt-0.5">{opt.description}</p>
+            </button>
+          ))}
+        </div>
+      </div>
+
       <div className="flex items-center justify-between">
         <div>
-          <p className="text-sm font-semibold text-gray-900">YouTube-Style Description</p>
-          <p className="text-xs text-gray-400 mt-0.5">Auto-generated summary + chapter timestamps</p>
+          <p className="text-sm font-semibold text-gray-900">{preset.label} Description</p>
+          <p className="text-xs text-gray-400 mt-0.5">
+            {withChapters ? 'Auto-generated summary + chapter timestamps' : 'Auto-generated caption + hashtags'}
+          </p>
         </div>
         <button
           onClick={handleGenerate}
@@ -212,29 +254,31 @@ function DescriptionTab({ voiceover, videoClips }: { voiceover: Voiceover; video
               <p className="text-sm text-gray-700 leading-relaxed">{description.summary}</p>
             </div>
 
-            {/* Chapters */}
-            <div className="bg-gray-50 border border-gray-100 rounded-2xl p-4 space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="text-[10px] font-bold uppercase tracking-widest text-gray-400">
-                  Chapters ({description.chapters.length})
-                </span>
-                <CopyButton
-                  text={description.chapters
-                    .map(c => `${formatTimestamp(c.time)} ${c.label}`)
-                    .join('\n')}
-                />
+            {/* Chapters — hidden on platforms without a chapter feature */}
+            {withChapters && (
+              <div className="bg-gray-50 border border-gray-100 rounded-2xl p-4 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-bold uppercase tracking-widest text-gray-400">
+                    Chapters ({description.chapters.length})
+                  </span>
+                  <CopyButton
+                    text={description.chapters
+                      .map(c => `${formatTimestamp(c.time)} ${c.label}`)
+                      .join('\n')}
+                  />
+                </div>
+                <div className="space-y-1 mt-1">
+                  {description.chapters.map((ch, i) => (
+                    <div key={i} className="flex items-center gap-3 py-1">
+                      <span className="font-mono text-xs font-bold text-violet-400 w-10 flex-shrink-0">
+                        {formatTimestamp(ch.time)}
+                      </span>
+                      <span className="text-sm text-gray-700">{ch.label}</span>
+                    </div>
+                  ))}
+                </div>
               </div>
-              <div className="space-y-1 mt-1">
-                {description.chapters.map((ch, i) => (
-                  <div key={i} className="flex items-center gap-3 py-1">
-                    <span className="font-mono text-xs font-bold text-violet-400 w-10 flex-shrink-0">
-                      {formatTimestamp(ch.time)}
-                    </span>
-                    <span className="text-sm text-gray-700">{ch.label}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
+            )}
 
             {/* Hashtags */}
             <div className="bg-gray-50 border border-gray-100 rounded-2xl p-4 space-y-2">

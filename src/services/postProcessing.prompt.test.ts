@@ -115,6 +115,18 @@ describe('generateDescription prompt building', () => {
     expect(contents).toMatch(/without the # symbol/);
   });
 
+  it('honors a non-default platform preset when one is passed', async () => {
+    generateContentMock.mockResolvedValue({
+      text: JSON.stringify({ summary: 's', chapters: [], hashtags: [] }),
+    });
+    await generateDescription(transcription, segments, analyses, 'tiktok');
+
+    const { contents } = lastCall();
+    expect(contents).toMatch(/^You are generating a video description in the TikTok style\./);
+    expect(contents).toMatch(/empty chapters array/i);
+    expect(contents).toMatch(/4-6 trend-friendly hashtags/);
+  });
+
   it('throws before calling Gemini when no API key is set', async () => {
     getApiKeyMock.mockReturnValue('');
     await expect(generateDescription(transcription, segments, analyses)).rejects.toThrow(
