@@ -1,7 +1,8 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import WaveSurfer from 'wavesurfer.js';
 import { VideoClip, Voiceover, TransitionType } from '../types';
-import { Play, Pause, Scissors, Wand2, Video, Plus, Zap, Layers, Star, Trash2 } from 'lucide-react';
+import { Play, Pause, Scissors, Wand2, Video, Plus, Minus, Maximize2, Zap, Layers, Star, Trash2 } from 'lucide-react';
+import { DEFAULT_PPS, fitPixelsPerSecond, stepPixelsPerSecond } from '../utils/timelineZoom';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 
@@ -89,7 +90,7 @@ export const Timeline: React.FC<TimelineProps> = ({
   useEffect(() => { videoClipsRef.current = videoClips; }, [videoClips]);
   useEffect(() => { voiceoverRef.current = voiceover; }, [voiceover]);
 
-  const pixelsPerSecond = 50;
+  const [pixelsPerSecond, setPixelsPerSecond] = useState<number>(DEFAULT_PPS);
   const TRACK_PADDING = TRACK_LABEL_W + 8; // label width + gap-2 (8px) = where lane content starts
 
   const voiceoverEffectiveDuration = voiceover
@@ -104,6 +105,15 @@ export const Timeline: React.FC<TimelineProps> = ({
 
   const usedTracks = videoClips.length > 0 ? Math.max(...videoClips.map(c => c.track ?? 0)) + 1 : 1;
   const numTracks = Math.max(2, usedTracks, extraTracks + 1);
+
+  const handleZoom = useCallback((direction: 1 | -1) => {
+    setPixelsPerSecond(pps => stepPixelsPerSecond(pps, direction));
+  }, []);
+
+  const handleFitToWindow = useCallback(() => {
+    const availableWidth = trackAreaRef.current?.clientWidth ?? 0;
+    setPixelsPerSecond(fitPixelsPerSecond(totalDuration, availableWidth));
+  }, [totalDuration]);
 
   const seekToTime = useCallback((time: number) => {
     const clamped = Math.max(0, Math.min(time, totalDuration));
@@ -296,6 +306,34 @@ export const Timeline: React.FC<TimelineProps> = ({
             {isPlaying ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
           </button>
           <span className="text-xs font-mono text-gray-400">{currentTime.toFixed(2)}s / {totalDuration.toFixed(2)}s</span>
+          <div className="w-px h-4 bg-gray-200" />
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => handleZoom(-1)}
+              title="Zoom out"
+              aria-label="Zoom out timeline"
+              className="p-1.5 rounded-lg text-gray-500 bg-white border border-gray-200 hover:border-violet-300 hover:text-violet-600 transition-all"
+            >
+              <Minus className="w-3.5 h-3.5" />
+            </button>
+            <span className="text-xs font-mono text-gray-400 w-12 text-center" title="Timeline scale">{Math.round(pixelsPerSecond)}px/s</span>
+            <button
+              onClick={() => handleZoom(1)}
+              title="Zoom in"
+              aria-label="Zoom in timeline"
+              className="p-1.5 rounded-lg text-gray-500 bg-white border border-gray-200 hover:border-violet-300 hover:text-violet-600 transition-all"
+            >
+              <Plus className="w-3.5 h-3.5" />
+            </button>
+            <button
+              onClick={handleFitToWindow}
+              title="Fit timeline to window"
+              aria-label="Fit timeline to window"
+              className="flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-medium text-gray-500 bg-white border border-gray-200 hover:border-violet-300 hover:text-violet-600 transition-all"
+            >
+              <Maximize2 className="w-3.5 h-3.5" /> Fit
+            </button>
+          </div>
           <div className="w-px h-4 bg-gray-200" />
           <button
             onClick={() => setExtraTracks(t => t + 1)}
