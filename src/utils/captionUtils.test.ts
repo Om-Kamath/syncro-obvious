@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { generateSRT, generateVTT } from './captionUtils';
+import { generateSRT, generateVTT, formatChapterTime, generateChaptersTxt } from './captionUtils';
+import type { Chapter } from '../types';
 
 const segments = [
   { text: 'Hello', start: 0, end: 1.5 },
@@ -83,5 +84,60 @@ describe('generateVTT', () => {
   it('falls back to segment cues when words are omitted or empty', () => {
     expect(generateVTT(segments, [])).toBe(generateVTT(segments));
     expect(generateVTT(segments, undefined)).toBe(generateVTT(segments));
+  });
+});
+
+const chapters: Chapter[] = [
+  { time: 0, label: 'Cold open' },
+  { time: 125, label: 'The setup' },
+  { time: 754, label: 'Deep dive' },
+  { time: 3661, label: 'Bonus teardown' },
+];
+
+describe('formatChapterTime (YouTube 0:00 style)', () => {
+  it('formats the first chapter timestamp as 0:00', () => {
+    expect(formatChapterTime(0)).toBe('0:00');
+  });
+
+  it('formats sub-hour times as unpadded m:ss', () => {
+    expect(formatChapterTime(5)).toBe('0:05');
+    expect(formatChapterTime(65)).toBe('1:05');
+    expect(formatChapterTime(599)).toBe('9:59');
+    expect(formatChapterTime(3599)).toBe('59:59');
+  });
+
+  it('switches to h:mm:ss at one hour', () => {
+    expect(formatChapterTime(3600)).toBe('1:00:00');
+    expect(formatChapterTime(3661)).toBe('1:01:01');
+  });
+
+  it('floors fractional seconds', () => {
+    expect(formatChapterTime(65.9)).toBe('1:05');
+  });
+});
+
+describe('generateChaptersTxt', () => {
+  it('renders a YouTube chapters fixture, one "m:ss label" line per chapter', () => {
+    expect(generateChaptersTxt(chapters)).toBe(
+      '0:00 Cold open\n' +
+      '2:05 The setup\n' +
+      '12:34 Deep dive\n' +
+      '1:01:01 Bonus teardown'
+    );
+  });
+
+  it('sorts chapters ascending — YouTube requires in-order timestamps', () => {
+    expect(
+      generateChaptersTxt([
+        { time: 90, label: 'Middle' },
+        { time: 0, label: 'Intro' },
+        { time: 30, label: 'Hook' },
+      ])
+    ).toBe('0:00 Intro\n0:30 Hook\n1:30 Middle');
+  });
+
+  it('trims label whitespace and returns an empty string for no chapters', () => {
+    expect(generateChaptersTxt([{ time: 0, label: '  Intro  ' }])).toBe('0:00 Intro');
+    expect(generateChaptersTxt([])).toBe('');
   });
 });
