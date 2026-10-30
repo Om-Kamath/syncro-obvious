@@ -98,4 +98,20 @@ describe('ProjectsPanel', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Retry loading saved projects' }));
     expect(onRetry).toHaveBeenCalledTimes(1);
   });
+
+  it('exposes the full project name as a title tooltip on the truncated row name', () => {
+    renderPanel();
+    const name = screen.getByTitle('Launch Teaser');
+    expect(name).toBeDefined();
+    expect(name.textContent).toBe('Launch Teaser');
+    expect(name.className).toContain('truncate');
+  });
+
+  it('contains very long project names in the delete confirmation', () => {
+    const longName = 'x'.repeat(300);
+    renderPanel({ projects: [{ id: 'p-long', name: longName, updatedAt: '2026-10-29T10:00:00.000Z' }] });
+    fireEvent.click(screen.getByRole('button', { name: `Delete ${longName}` }));
+    const confirm = screen.getByText(/This can’t be undone\./);
+    expect(confirm.className).toContain('break-words');
+  });
 });
