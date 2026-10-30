@@ -1,15 +1,28 @@
 import express, { type Express, type NextFunction, type Request, type Response } from 'express';
+import type { Database as SqliteDatabase } from 'better-sqlite3';
+import { openDatabase, runMigrations } from './db/migrate';
+import { projectsRouter } from './projects/projects.router';
+import { ProjectsStore } from './projects/projects.store';
+
+export interface CreateAppOptions {
+  /** Pre-migrated database override; tests pass an in-memory database. */
+  db?: SqliteDatabase;
+}
 
 /**
  * App factory: builds a fully-configured Express app without binding a port,
  * so tests and future tooling get a fresh instance per call.
- * server/index.ts owns the actual listener.
+ * server/index.ts owns the actual listener and the on-disk database path.
  */
-export function createApp(): Express {
+export function createApp(options: CreateAppOptions = {}): Express {
   const app = express();
 
   app.disable('x-powered-by');
   app.use(express.json());
+
+  const db = options.db ?? openDatabase();
+  runMigrations(db);
+  app.use('/api/projects', projectsRouter(new ProjectsStore(db)));
 
   app.get('/healthz', (_req, res) => {
     res.json({ ok: true });
