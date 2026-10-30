@@ -1,6 +1,6 @@
 
 import React, { Suspense, useState, useRef, useEffect } from 'react';
-import { VideoClip, Voiceover, CaptionStyle } from './types';
+import { VideoClip, Voiceover, CaptionStyle, CaptionSegment } from './types';
 import { FileUploader } from './components/FileUploader';
 import { Timeline } from './components/Timeline';
 import { ClipEditor } from './components/ClipEditor';
@@ -35,6 +35,7 @@ import {
 } from 'lucide-react';
 import { setApiKey, hasApiKey } from './services/apiKey';
 import { chainClips } from './utils/chainClips';
+import { resolveWordTimings, findActiveWordIndex } from './utils/wordTiming';
 import { motion, AnimatePresence } from 'motion/react';
 
 // Heavy Gemini export UI — code-split so it lands in its own chunk and is
@@ -52,7 +53,7 @@ function CaptionOverlay({
   currentTime,
   style,
 }: {
-  segments: Array<{ text: string; start: number; end: number }>;
+  segments: CaptionSegment[];
   currentTime: number;
   style: CaptionStyle;
 }) {
@@ -63,15 +64,14 @@ function CaptionOverlay({
     style.position === 'bottom' ? 'bottom-6' : 'top-6'
   );
   if (style.mode === 'word-highlight') {
-    const words = seg.text.split(' ');
-    const wordDur = (seg.end - seg.start) / Math.max(words.length, 1);
-    const wordIdx = Math.floor((currentTime - seg.start) / wordDur);
+    const words = resolveWordTimings(seg);
+    const wordIdx = findActiveWordIndex(words, currentTime);
     return (
       <div className={baseContainer}>
         <div className="px-4 py-2 rounded-xl flex flex-wrap gap-x-1.5 gap-y-1 justify-center max-w-2xl"
           style={{ backgroundColor: style.bgColor, fontSize: `${style.fontSize}px` }}>
           {words.map((w, i) => (
-            <span key={i} style={{ color: i === wordIdx ? '#7c3aed' : style.color, fontWeight: i === wordIdx ? 700 : 500, transition: 'color 0.1s' }}>{w}</span>
+            <span key={i} style={{ color: i === wordIdx ? '#7c3aed' : style.color, fontWeight: i === wordIdx ? 700 : 500, transition: 'color 0.1s' }}>{w.word}</span>
           ))}
         </div>
       </div>
