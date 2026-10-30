@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { openEditorShell } from './support';
+import { openEditorShell, DUMMY_VIDEO } from './support';
 
 /**
  * Smoke coverage for the shortest path through Syncro's front doors:
