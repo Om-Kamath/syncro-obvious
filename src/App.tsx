@@ -1,4 +1,3 @@
-
 import React, { Suspense, useState, useRef, useEffect, useCallback } from 'react';
 import { VideoClip, Voiceover, CaptionStyle, CaptionSegment, ThumbnailCandidate } from './types';
 import { CaptionOverlay } from './components/CaptionOverlay';
