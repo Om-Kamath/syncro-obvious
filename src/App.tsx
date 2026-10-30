@@ -74,7 +74,7 @@ function attachFilmstrips(
   }
 }
 
-function CaptionOverlay({
+export function CaptionOverlay({
   segments,
   currentTime,
   style,
