@@ -1,6 +1,6 @@
 
 import React, { Suspense, useState, useRef, useEffect, useCallback } from 'react';
-import { VideoClip, Voiceover, CaptionStyle, CaptionSegment, ThumbnailCandidate } from './types';
+import { VideoClip, Voiceover, CaptionStyle, CaptionSegment, ThumbnailCandidate, MediaAsset } from './types';
 import { CaptionOverlay } from './components/CaptionOverlay';
 import { FileUploader } from './components/FileUploader';
 import { MediaDropLayer, type ImportedMedia } from './components/MediaDropLayer';
@@ -13,6 +13,7 @@ import { VoiceoverEditor } from './components/VoiceoverEditor';
 import { LogPanel } from './components/LogPanel';
 import { ToastContainer } from './components/ToastContainer';
 import { toast } from './services/toastStore';
+import { MediaLibraryPanel } from './components/MediaLibraryPanel';
 import {
   analyzeVoiceover,
   analyzeVideo,
@@ -47,6 +48,7 @@ import { DEFAULT_CAPTION_STYLE } from './utils/captionPresets';
 import { captureFilmstrip } from './utils/clipThumbnails';
 import { estimateNarrationFlowCost, estimateTtsCost } from './services/costEstimate';
 import { CostEstimateBadge } from './components/CostEstimateBadge';
+import { countAssetUsage, clipFromAsset } from './utils/mediaLibrary';
 import { motion, AnimatePresence } from 'motion/react';
 import { ProjectSaveModal } from './components/ProjectSaveModal';
 import { RestoreErrorBanner } from './components/RestoreErrorBanner';
@@ -86,6 +88,7 @@ function attachFilmstrips(
       .catch(err => console.warn(`Filmstrip capture failed for "${clip.name}"`, err));
   }
 }
+const newMediaId = () => Math.random().toString(36).slice(2, 11);
 
 type VoiceoverMethod = 'upload' | 'script' | 'auto';
 
@@ -267,6 +270,7 @@ function OnboardingModal({
 
 export default function App() {
   const [videoClips, setVideoClips] = useState<VideoClip[]>([]);
+  const [mediaAssets, setMediaAssets] = useState<MediaAsset[]>([]);
   const [voiceover, setVoiceover] = useState<Voiceover | null>(null);
   const [isAligning, setIsAligning] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
@@ -373,12 +377,15 @@ export default function App() {
     new Promise(resolve => { const a = new Audio(url); a.onloadedmetadata = () => resolve(a.duration); a.onerror = () => resolve(0); });
 
   const handleVideoUpload = async (files: File[]) => {
-    const newClips: VideoClip[] = await Promise.all(files.map(async (file) => {
+    const created: Array<{ asset: MediaAsset; clip: VideoClip }> = await Promise.all(files.map(async (file) => {
       const url = URL.createObjectURL(file);
       const duration = await getVideoDuration(url);
-      return { id: Math.random().toString(36).substr(2, 9), file, url, duration, startTime: 0, name: file.name };
+      const asset: MediaAsset = { id: newMediaId(), file, url, duration, name: file.name };
+      return { asset, clip: clipFromAsset(asset, newMediaId()) };
     }));
-    setVideoClips(prev => [...prev, ...newClips]);
+    setMediaAssets(prev => [...prev, ...created.map(({ asset }) => asset)]);
+    const newClips = created.map(({ clip }) => clip);
+    setVideoClips(prev => chainClips([...prev, ...newClips]));
     attachFilmstrips(newClips, setVideoClips);
   };
 
@@ -519,15 +526,29 @@ export default function App() {
   };
 
   const removeVideos = (ids: string[]) => {
-    setVideoClips(prev => {
-      const idSet = new Set(ids);
-      prev.forEach(c => { if (idSet.has(c.id)) URL.revokeObjectURL(c.url); });
-      // Ripple delete: rechain the remaining clips so no gap is left behind,
-      // whether one clip or a multi-select batch was removed.
-      return rippleDeleteMany(prev, ids);
-    });
+    // Blob URLs are owned by the library asset — they may back several clips
+    // and must survive clip removal for reuse — so revocation happens on
+    // asset removal only. Ripple delete rechains the remaining clips so no
+    // gap is left behind, whether one clip or a multi-select batch was removed.
+    setVideoClips(prev => rippleDeleteMany(prev, ids));
   };
   const removeVideo = (id: string) => removeVideos([id]);
+
+  // Reuse: instantiate a fresh timeline clip from a library asset, appended
+  // at the end of the timeline (chainClips re-stamps startTime cumulatively).
+  const handleAddAssetToTimeline = (assetId: string) => {
+    const asset = mediaAssets.find(a => a.id === assetId);
+    if (!asset) return;
+    setVideoClips(prev => chainClips([...prev, clipFromAsset(asset, newMediaId())]));
+  };
+
+  const handleRemoveAsset = (assetId: string) => {
+    const asset = mediaAssets.find(a => a.id === assetId);
+    if (!asset) return;
+    if (videoClips.some(c => c.assetId === assetId)) return; // guarded in the UI too
+    URL.revokeObjectURL(asset.url);
+    setMediaAssets(prev => prev.filter(a => a.id !== assetId));
+  };
 
   // Revoke the previous voiceover's blob URL whenever it is replaced or
   // removed — otherwise each upload or TTS run leaks the old audio blob.
@@ -831,6 +852,13 @@ export default function App() {
               </AnimatePresence>
             </div>
           </section>
+
+          <MediaLibraryPanel
+            assets={mediaAssets}
+            usageCounts={countAssetUsage(videoClips)}
+            onAddToTimeline={handleAddAssetToTimeline}
+            onRemoveAsset={handleRemoveAsset}
+          />
         </div>
 
         <div className="col-span-9 space-y-5">

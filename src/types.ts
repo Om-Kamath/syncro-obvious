@@ -2,6 +2,17 @@ export type WorkflowMode = 'upload-both' | 'script-video' | 'video-only';
 
 export type TransitionType = 'cut' | 'fade' | 'dissolve' | 'wipe';
 
+// A media item imported into the project (an uploaded video). Assets own
+// their blob URL — clips are timeline instances that reference an asset, so
+// the URL is revoked only when the asset leaves the library.
+export interface MediaAsset {
+  id: string;
+  file: File;
+  url: string;
+  duration: number; // original media duration in seconds
+  name: string;
+}
+
 export interface VideoClip {
   id: string;
   file: File;
@@ -11,6 +22,7 @@ export interface VideoClip {
   trimStart?: number;       // seconds into the original file to start playback (default 0)
   startTime: number;        // start time in the overall timeline
   name: string;
+  assetId?: string;         // media-library asset this clip was instantiated from
   analysis?: string;
   textOverlay?: string;     // optional caption shown in preview while clip is active
   track?: number;           // video track layer (0 = default, stacks vertically)
