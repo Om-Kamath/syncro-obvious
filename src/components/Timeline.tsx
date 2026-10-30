@@ -3,6 +3,7 @@ import WaveSurfer from 'wavesurfer.js';
 import { VideoClip, Voiceover, TransitionType } from '../types';
 import { Play, Pause, Scissors, Wand2, Video, Plus, Minus, Maximize2, Zap, Layers, Star, Trash2 } from 'lucide-react';
 import { DEFAULT_PPS, fitPixelsPerSecond, stepPixelsPerSecond } from '../utils/timelineZoom';
+import { findClipAtPlayhead, splitClipsAtPlayhead } from '../utils/clipSplit';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 
@@ -118,6 +119,18 @@ export const Timeline: React.FC<TimelineProps> = ({
     const availableWidth = trackAreaRef.current?.clientWidth ?? 0;
     setPixelsPerSecond(fitPixelsPerSecond(totalDuration, availableWidth));
   }, [totalDuration]);
+
+  // Blade the clip under the playhead. Refs keep the handler stable; the
+  // right half mints its own blob URL so per-clip revoke-on-delete stays valid.
+  const handleSplitAtPlayhead = useCallback(() => {
+    const next = splitClipsAtPlayhead(
+      videoClipsRef.current,
+      currentTimeRef.current,
+      Math.random().toString(36).slice(2, 11),
+      (clip) => URL.createObjectURL(clip.file),
+    );
+    if (next) onVideoClipChange(next);
+  }, [onVideoClipChange]);
 
   const seekToTime = useCallback((time: number) => {
     const clamped = Math.max(0, Math.min(time, totalDuration));
@@ -323,6 +336,10 @@ export const Timeline: React.FC<TimelineProps> = ({
 
   const sortedClips = [...videoClips].sort((a, b) => a.startTime - b.startTime);
 
+  // Split is only offered strictly inside a clip — at a boundary it would be a no-op.
+  const clipAtPlayhead = findClipAtPlayhead(videoClips, currentTime);
+  const canSplitAtPlayhead = !!clipAtPlayhead && currentTime > clipAtPlayhead.startTime;
+
   return (
     <div className="bg-white border border-gray-200 rounded-2xl overflow-hidden shadow-sm">
       {/* Header */}
@@ -361,6 +378,15 @@ export const Timeline: React.FC<TimelineProps> = ({
             </button>
           </div>
           <div className="w-px h-4 bg-gray-200" />
+          <button
+            onClick={handleSplitAtPlayhead}
+            disabled={!canSplitAtPlayhead}
+            title="Split clip at playhead"
+            aria-label="Split clip at playhead"
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-gray-500 bg-white border border-gray-200 hover:border-violet-300 hover:text-violet-600 hover:bg-violet-50 transition-all disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:border-gray-200 disabled:hover:text-gray-500 disabled:hover:bg-white ${FOCUS_RING}`}
+          >
+            <Scissors className="w-3.5 h-3.5" /> Split
+          </button>
           <button
             onClick={() => setExtraTracks(t => t + 1)}
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-gray-500 bg-white border border-gray-200 hover:border-violet-300 hover:text-violet-600 hover:bg-violet-50 transition-all ${FOCUS_RING}`}
