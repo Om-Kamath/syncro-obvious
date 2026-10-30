@@ -371,14 +371,17 @@ export const Timeline: React.FC<TimelineProps> = ({
     setDraggingTrimId(clip.id);
   };
 
-  // Frame-accurate trim shared by mouse drag and keyboard. Moving the in-point
-  // compensates startTime so the clip's visible left edge stays where the user
-  // grabbed it (the historical behavior of the drag handle).
-  const trimClip = (clip: VideoClip, side: TrimSide, deltaSec: number): VideoClip => {
-    const next = applyFrameTrim(clip, trimSide(side), deltaSec);
+  // Frame-accurate trim shared by mouse drag and keyboard. `base` is the clip
+  // state the delta applies to: the drag-start snapshot for mouse drags
+  // (deltaSec is the total displacement — applying it to the live clip would
+  // compound every mousemove) or the live clip for keyboard (one frame per
+  // press). In-trims compensate startTime so the clip's visible left edge
+  // stays where the user grabbed it (historical drag-handle behavior).
+  const trimFrom = (base: VideoClip, side: TrimSide, deltaSec: number): VideoClip => {
+    const next = applyFrameTrim(base, trimSide(side), deltaSec);
     if (side !== 'left') return next;
-    const deltaIn = (next.trimStart ?? 0) - (clip.trimStart ?? 0);
-    return { ...next, startTime: Math.max(0, clip.startTime + deltaIn) };
+    const deltaIn = (next.trimStart ?? 0) - (base.trimStart ?? 0);
+    return { ...next, startTime: Math.max(0, base.startTime + deltaIn) };
   };
 
   useEffect(() => {
@@ -486,7 +489,7 @@ export const Timeline: React.FC<TimelineProps> = ({
     else return;
     e.preventDefault(); e.stopPropagation();
     onVideoClipChange(videoClipsRef.current.map((c: VideoClip) =>
-      c.id !== clip.id ? c : trimClip(c, side, delta)
+      c.id !== clip.id ? c : trimFrom(c, side, delta)
     ));
   };
   const handleVoiceoverMouseDown = (e: React.MouseEvent) => {
