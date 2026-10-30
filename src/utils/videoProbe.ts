@@ -72,10 +72,11 @@ export function probeVideo(url: string, sampleFrames = 8, timeoutMs = 1500): Pro
       settled = true;
       clearTimeout(timer);
       if (rvfcHandle !== null && rvfc.cancelVideoFrameCallback) rvfc.cancelVideoFrameCallback(rvfcHandle);
+      const finalDuration = Number.isFinite(video.duration) ? video.duration : 0;
       video.pause();
       video.removeAttribute('src');
-      video.load(); // release the media decoder for GC
-      resolve({ duration: Number.isFinite(video.duration) ? video.duration : 0, fps });
+      video.load(); // release the media decoder for GC — resets duration, so read it above
+      resolve({ duration: finalDuration, fps });
     };
 
     const timer = setTimeout(() => finish(), timeoutMs);
