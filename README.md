@@ -22,6 +22,8 @@ A narration-first video editor in the browser: import clips, generate narration 
 | Script | What it does |
 | --- | --- |
 | `npm run dev` | Start the dev server on port 3000 |
+| `npm run server:dev` | Start the Syncro API server on port 3001 (watch mode) |
+| `npm run server:start` | Start the API server without watch |
 | `npm run build` | Production build to `dist/` |
 | `npm run preview` | Preview the production build |
 | `npm test` | Run Vitest tests |
