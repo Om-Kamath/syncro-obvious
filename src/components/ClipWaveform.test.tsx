@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, cleanup, act } from '@testing-library/react';
+import { render, cleanup, act, fireEvent } from '@testing-library/react';
 import { ClipWaveform } from './ClipWaveform';
 import { Timeline } from './Timeline';
 import type { VideoClip } from '../types';
@@ -73,6 +73,19 @@ function renderTimeline(clips: VideoClip[]) {
   );
 }
 
+// The timeline window-renders clips (timelineVirtualization); jsdom has no layout
+// engine, so tests inject a scroll-viewport width big enough to mount every clip
+// under test and fire the scroll event the component listens for.
+function setViewport(container: HTMLElement, clientWidth: number, scrollLeft = 0) {
+  const el = container.querySelector('[data-testid="timeline-scroll-area"]');
+  if (!(el instanceof HTMLElement)) throw new Error('timeline scroll area not found');
+  Object.defineProperty(el, 'clientWidth', { value: clientWidth, configurable: true });
+  Object.defineProperty(el, 'scrollLeft', { value: scrollLeft, configurable: true, writable: true });
+  act(() => {
+    fireEvent.scroll(el);
+  });
+}
+
 describe('ClipWaveform', () => {
   beforeEach(() => {
     resetWaveSurfer();
@@ -143,10 +156,12 @@ describe('Timeline clip waveforms', () => {
   });
 
   it('renders one waveform per clip, wired to each clip url', () => {
-    renderTimeline([
+    const { container } = renderTimeline([
       makeClip({ id: 'clip-1', url: 'blob:clip-1', startTime: 0 }),
       makeClip({ id: 'clip-2', url: 'blob:clip-2', startTime: 4 }),
     ]);
+    // Widen the window so both clips are inside the visible range and mount.
+    setViewport(container, 1200);
     expect(waveSurferInstances).toHaveLength(2);
     expect(waveSurferInstances.map((i) => i.options.url)).toEqual(['blob:clip-1', 'blob:clip-2']);
   });
