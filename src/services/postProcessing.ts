@@ -1,6 +1,7 @@
 import { Type } from "@google/genai";
 import { generateContent, normalizeErrorMessage } from "./geminiClient";
-import { modelFor } from "./models";
+import { resolveOperationModel } from "./models";
+import { getModelSettings } from "./modelSettings";
 import { finishLog, startLog } from "./logger";
 
 /**
@@ -28,7 +29,7 @@ export async function generateDescription(
   segments: Array<{ text: string; start: number; end: number }>,
   videoAnalyses: string[]
 ): Promise<{ summary: string; chapters: Array<{ time: number; label: string }>; hashtags: string[] }> {
-  const MODEL = modelFor('description');
+  const MODEL = resolveOperationModel(getModelSettings(), 'description');
   const log = startLog('Generate Description', MODEL, logDetail(transcription, segments.length));
   try {
     const prompt = `You are generating a YouTube-style video description.
@@ -90,7 +91,7 @@ export async function identifyKeyMoments(
   segments: Array<{ text: string; start: number; end: number }>,
   videoAnalyses: string[]
 ): Promise<Array<{ timestamp: number; quote: string; reason: string }>> {
-  const MODEL = modelFor('thumbnails');
+  const MODEL = resolveOperationModel(getModelSettings(), 'thumbnails');
   const log = startLog('Identify Key Moments', MODEL, logDetail(transcription, segments.length));
   try {
     const prompt = `Analyze this video and identify the 4-5 most emotionally charged, surprising, or compelling moments that would make great video thumbnails for click-through on YouTube or social media.

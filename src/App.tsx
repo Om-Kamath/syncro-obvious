@@ -34,6 +34,9 @@ import {
   Key,
 } from 'lucide-react';
 import { setApiKey, hasApiKey } from './services/apiKey';
+import { getModelSettings, setModelSettings as persistModelSettings } from './services/modelSettings';
+import type { ModelSettings } from './services/models';
+import { ModelSettingsSection } from './components/ModelSettingsSection';
 import { chainClips } from './utils/chainClips';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -283,6 +286,13 @@ export default function App() {
   const [showLogs, setShowLogs] = useState(false);
   const [showApiKeyModal, setShowApiKeyModal] = useState(!hasApiKey());
   const [apiKeyInput, setApiKeyInput] = useState('');
+  const [modelSettings, setModelSettingsState] = useState<ModelSettings>(() => getModelSettings());
+  // Gemini services read persisted settings at call time; write-through on
+  // every edit so the next call resolves against the latest selection.
+  const updateModelSettings = (next: ModelSettings) => {
+    setModelSettingsState(next);
+    persistModelSettings(next);
+  };
   const videoRefs = useRef<Record<string, HTMLVideoElement>>({});
   const [previewHeight, setPreviewHeight] = useState(260);
   const isResizingPreview = useRef(false);
@@ -827,8 +837,8 @@ export default function App() {
                   <Key className="w-5 h-5 text-violet-600" />
                 </div>
                 <div>
-                  <h2 className="text-base font-bold text-gray-900">Gemini API Key</h2>
-                  <p className="text-xs text-gray-400">Required for AI features</p>
+                  <h2 className="text-base font-bold text-gray-900">Gemini Settings</h2>
+                  <p className="text-xs text-gray-400">API key & model selection</p>
                 </div>
               </div>
               <p className="text-xs text-gray-500 mb-4">
@@ -863,6 +873,7 @@ export default function App() {
                   Save Key
                 </button>
               </div>
+              <ModelSettingsSection settings={modelSettings} onChange={updateModelSettings} />
             </motion.div>
           </div>
         )}

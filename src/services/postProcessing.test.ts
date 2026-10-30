@@ -1,6 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
-const { generateContentMock } = vi.hoisted(() => ({ generateContentMock: vi.fn() }));
+const { generateContentMock, getModelSettingsMock } = vi.hoisted(() => ({
+  generateContentMock: vi.fn(),
+  getModelSettingsMock: vi.fn(),
+}));
 
 vi.mock('@google/genai', () => ({
   GoogleGenAI: class {
@@ -16,6 +19,10 @@ vi.mock('@google/genai', () => ({
 
 vi.mock('./apiKey', () => ({
   getApiKey: () => 'test-key',
+}));
+
+vi.mock('./modelSettings', () => ({
+  getModelSettings: getModelSettingsMock,
 }));
 
 import { generateDescription, identifyKeyMoments, parseModelJson } from './postProcessing';
@@ -45,6 +52,7 @@ describe('parseModelJson', () => {
 describe('generateDescription', () => {
   beforeEach(() => {
     generateContentMock.mockReset();
+    getModelSettingsMock.mockReset().mockReturnValue({});
   });
 
   it('returns the parsed description on valid output', async () => {
@@ -74,6 +82,7 @@ describe('generateDescription', () => {
 describe('identifyKeyMoments', () => {
   beforeEach(() => {
     generateContentMock.mockReset();
+    getModelSettingsMock.mockReset().mockReturnValue({});
   });
 
   it('returns the parsed moments on valid output', async () => {
@@ -98,6 +107,7 @@ describe('logging', () => {
 
   beforeEach(() => {
     generateContentMock.mockReset();
+    getModelSettingsMock.mockReset().mockReturnValue({});
     collected.length = 0;
     unsubscribe = subscribe(latest => {
       collected.length = 0;
@@ -148,5 +158,25 @@ describe('logging', () => {
     ).rejects.toThrow('API error: quota exceeded');
     expect(collected[0]).toMatchObject({ fn: 'Generate Description', status: 'error' });
     expect(collected[0].error).toBe('API error: quota exceeded');
+  });
+});
+
+describe('per-op model selection', () => {
+  beforeEach(() => {
+    generateContentMock.mockReset();
+    getModelSettingsMock.mockReset().mockReturnValue({});
+  });
+
+  it('keeps the registry baseline for description when settings are untouched', async () => {
+    generateContentMock.mockResolvedValue({ text: '{"summary":"s","chapters":[],"hashtags":[]}' });
+    await generateDescription(noopTranscription, noopSegments, noopAnalyses);
+    expect(generateContentMock.mock.calls[0][0].model).toBe(MODELS.flash);
+  });
+
+  it('resolves the description model from settings (override wins)', async () => {
+    getModelSettingsMock.mockReturnValue({ overrides: { description: 'pro' } });
+    generateContentMock.mockResolvedValue({ text: '{"summary":"s","chapters":[],"hashtags":[]}' });
+    await generateDescription(noopTranscription, noopSegments, noopAnalyses);
+    expect(generateContentMock.mock.calls[0][0].model).toBe(MODELS.pro);
   });
 });
