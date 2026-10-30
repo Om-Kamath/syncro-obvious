@@ -9,6 +9,7 @@ import { selectionReducer, initialSelection, clipIdsInRect, type SelectionAction
 import { collectSnapCandidates, findSnap } from '../utils/timelineSnap';
 import { estimateAlignmentFlowCost } from '../services/costEstimate';
 import { CostEstimateBadge } from './CostEstimateBadge';
+import { programGainAtTime } from '../utils/gainEnvelope';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 
@@ -220,15 +221,17 @@ export const Timeline: React.FC<TimelineProps> = ({
   }, [voiceover]);
 
   useEffect(() => {
-    if (!isPlaying) { if (wavesurfer.current?.isPlaying()) wavesurfer.current.pause(); return; }
+    if (!isPlaying) { if (wavesurfer.current?.isPlaying()) wavesurfer.current.pause(); wavesurfer.current?.setVolume(1); return; }
     let frameId: number;
     let lastTime = performance.now();
     const tick = (now: number) => {
       const delta = (now - lastTime) / 1000;
       lastTime = now;
       const nextTime = currentTimeRef.current + delta;
-      if (nextTime >= totalDuration) { setIsPlaying(false); onTimeUpdate(totalDuration); if (wavesurfer.current?.isPlaying()) wavesurfer.current.pause(); return; }
+      if (nextTime >= totalDuration) { setIsPlaying(false); onTimeUpdate(totalDuration); if (wavesurfer.current?.isPlaying()) wavesurfer.current.pause(); wavesurfer.current?.setVolume(1); return; }
       onTimeUpdate(nextTime);
+      // Per-clip fade envelope shapes the voiceover (the program audio) as the playhead crosses clip spans.
+      wavesurfer.current?.setVolume(programGainAtTime(videoClipsRef.current, nextTime));
       if (wavesurfer.current && voiceover) {
         const vStartTime = voiceover.startTime ?? 0;
         const vTrimStart = voiceover.trimStart ?? 0;

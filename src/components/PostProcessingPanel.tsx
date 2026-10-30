@@ -57,6 +57,7 @@ import {
   GIF_WIDTH_OPTIONS,
   MAX_GIF_FRAMES,
 } from '../utils/gifExport';
+import { computeGainEnvelope } from '../utils/gainEnvelope';
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -1035,8 +1036,11 @@ function ExportTab({
       const dest = audioCtx.createMediaStreamDestination();
       const source = audioCtx.createBufferSource();
       source.buffer = mixedBuffer;
-      source.connect(dest);
-      source.connect(audioCtx.destination);
+      // Per-clip fade envelope rides the graph as a master gain; neutral (1) keeps exports unchanged.
+      const masterGain = audioCtx.createGain();
+      source.connect(masterGain);
+      masterGain.connect(dest);
+      masterGain.connect(audioCtx.destination);
 
       // Build combined stream
       const canvasStream = canvas.captureStream(30);
@@ -1078,6 +1082,15 @@ function ExportTab({
 
         // Find active clip
         const hit = getClipAtTime(videoClips, elapsed);
+        // Gain follows the drawn clip so fades stay in sync with the picture.
+        masterGain.gain.value = hit
+          ? computeGainEnvelope({
+              localTime: hit.localTime,
+              clipDuration: hit.clip.trimmedDuration ?? hit.clip.duration,
+              fadeIn: hit.clip.fadeIn,
+              fadeOut: hit.clip.fadeOut,
+            })
+          : 1;
         ctx.fillStyle = '#000';
         ctx.fillRect(0, 0, W, H);
         if (hit) {

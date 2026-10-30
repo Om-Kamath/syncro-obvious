@@ -15,6 +15,8 @@ export interface VideoClip {
   textOverlay?: string;     // optional caption shown in preview while clip is active
   track?: number;           // video track layer (0 = default, stacks vertically)
   transitionIn?: TransitionType; // transition from the previous clip into this one
+  fadeIn?: number;          // seconds of audio fade-in across this clip's span (shapes the voiceover)
+  fadeOut?: number;         // seconds of audio fade-out at the end of this clip's span
   alternatives?: Array<{ id: string; confidence: number; reason: string }>; // AI-suggested alternative clips for this position
   thumbnails?: string[];    // filmstrip JPEG data URLs sampled at import (timeline background)
   mediaId?: string;      // /api/media id once this clip's bytes are persisted (project save)
