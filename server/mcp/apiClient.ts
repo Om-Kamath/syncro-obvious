@@ -194,4 +194,22 @@ export class SyncroApiClient {
     const body = await assertOk(response);
     return toProjectRecord(body);
   }
+
+  async createProject(payload: { name: string; state: ProjectStatePayload }): Promise<ProjectRecord> {
+    const response = await this.fetchImpl(`${this.baseUrl}/api/projects`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const body = await assertOk(response);
+    return toProjectRecord(body);
+  }
+
+  async deleteProject(id: string): Promise<void> {
+    const response = await this.fetchImpl(`${this.baseUrl}/api/projects/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+    });
+    // 204 has no body; assertOk still maps non-2xx to SyncroApiError.
+    await assertOk(response);
+  }
 }

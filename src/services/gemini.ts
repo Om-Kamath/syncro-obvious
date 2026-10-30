@@ -117,6 +117,31 @@ export async function generateAudioFromScript(
   }
 }
 
+/**
+ * Prompt builder for the narration script writer — shared verbatim by the UI
+ * flow (`generateNarrationFromVideos`) and the MCP `generate_narration` tool
+ * so both surfaces always produce identical scripts for the same clips.
+ */
+export function buildNarrationPrompt(
+  clips: Array<{ name: string; analysis: string; duration: number }>
+): string {
+  const totalDuration = clips.reduce((s, c) => s + c.duration, 0);
+  return `You are a documentary narrator. Based on these video clips, write a natural, engaging narration script.
+The total video duration is ${totalDuration.toFixed(1)} seconds — keep your script roughly the same length when spoken at a natural pace.
+Do NOT include stage directions, timestamps, or labels. Output only the words to be spoken.
+
+Video clips:
+${clips.map((c, i) => `Clip ${i + 1} (${c.duration.toFixed(1)}s) — "${c.name}": ${c.analysis}`).join('\n')}`;
+}
+
+/**
+ * Transcription prompt — shared verbatim by the UI flow (`analyzeVoiceover`)
+ * and the MCP `generate_captions` tool. Asks only for text: timestamps are
+ * estimated locally (estimateSegments) at zero extra cost.
+ */
+export const TRANSCRIPTION_PROMPT =
+  'Transcribe all spoken words in this audio exactly as spoken. Return only the transcription text with natural sentence punctuation. No labels, no timestamps, no commentary.';
+
 export async function generateNarrationFromVideos(
   videoClips: Array<{ name: string; analysis: string; duration: number }>,
   voiceName = 'Aoede'
@@ -127,12 +152,7 @@ export async function generateNarrationFromVideos(
   try {
     const scriptResponse = await generateContent({
       model: MODEL,
-      contents: `You are a documentary narrator. Based on these video clips, write a natural, engaging narration script.
-The total video duration is ${totalDuration.toFixed(1)} seconds — keep your script roughly the same length when spoken at a natural pace.
-Do NOT include stage directions, timestamps, or labels. Output only the words to be spoken.
-
-Video clips:
-${videoClips.map((c, i) => `Clip ${i + 1} (${c.duration.toFixed(1)}s) — "${c.name}": ${c.analysis}`).join('\n')}`,
+      contents: buildNarrationPrompt(videoClips),
     }, log);
 
     const script = scriptResponse.text?.trim() || 'No narration could be generated.';
@@ -188,7 +208,7 @@ export async function analyzeVoiceover(
       contents: {
         parts: [
           { fileData: { mimeType: audioFile.type, fileUri } },
-          { text: 'Transcribe all spoken words in this audio exactly as spoken. Return only the transcription text with natural sentence punctuation. No labels, no timestamps, no commentary.' },
+          { text: TRANSCRIPTION_PROMPT },
         ],
       },
       config: { temperature: 0 },

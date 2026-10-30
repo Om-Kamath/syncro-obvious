@@ -7,6 +7,8 @@ import { DEFAULT_PPS, fitPixelsPerSecond, stepPixelsPerSecond } from '../utils/t
 import { findClipAtPlayhead, splitClipsAtPlayhead } from '../utils/clipSplit';
 import { selectionReducer, initialSelection, clipIdsInRect, type SelectionAction } from '../utils/selectionReducer';
 import { collectSnapCandidates, findSnap } from '../utils/timelineSnap';
+import { estimateAlignmentFlowCost } from '../services/costEstimate';
+import { CostEstimateBadge } from './CostEstimateBadge';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 
@@ -492,6 +494,18 @@ export const Timeline: React.FC<TimelineProps> = ({
   const clipAtPlayhead = findClipAtPlayhead(videoClips, currentTime);
   const canSplitAtPlayhead = !!clipAtPlayhead && currentTime > clipAtPlayhead.startTime;
 
+  // Pre-run estimate for the whole Auto-Align flow: transcription (when the
+  // uploaded voiceover hasn't been transcribed yet) + un-analyzed clip
+  // analysis + alignment.
+  const alignmentEstimate = voiceover && videoClips.length > 0
+    ? estimateAlignmentFlowCost({
+        transcriptionDurationSec: voiceover.file && !voiceover.transcription ? voiceover.duration : 0,
+        transcriptionChars: voiceover.transcription?.length ?? 0,
+        unanalyzedClipDurationsSec: videoClips.filter(c => !c.analysis).map(c => c.duration),
+        analysisChars: videoClips.reduce((s, c) => s + (c.analysis?.length ?? 0), 0),
+      })
+    : null;
+
   return (
     <div className="bg-white border border-gray-200 rounded-2xl overflow-hidden shadow-sm">
       {/* Header */}
@@ -595,6 +609,7 @@ export const Timeline: React.FC<TimelineProps> = ({
               </>
             )}
           </div>
+          {alignmentEstimate && <CostEstimateBadge estimate={alignmentEstimate} />}
           <button
             onClick={onAutoAlign}
             disabled={isAligning || !voiceover || videoClips.length === 0}

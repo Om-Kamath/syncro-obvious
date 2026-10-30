@@ -12,6 +12,7 @@ import { ClipEditor } from './components/ClipEditor';
 import { VoiceoverEditor } from './components/VoiceoverEditor';
 import { LogPanel } from './components/LogPanel';
 import { ToastContainer } from './components/ToastContainer';
+import { toast } from './services/toastStore';
 import {
   analyzeVoiceover,
   analyzeVideo,
@@ -47,6 +48,8 @@ import { setApiKey, hasApiKey } from './services/apiKey';
 import { chainClips, rippleDeleteMany } from './utils/chainClips';
 import { DEFAULT_CAPTION_STYLE } from './utils/captionPresets';
 import { captureFilmstrip } from './utils/clipThumbnails';
+import { estimateNarrationFlowCost, estimateTtsCost } from './services/costEstimate';
+import { CostEstimateBadge } from './components/CostEstimateBadge';
 import { motion, AnimatePresence } from 'motion/react';
 import { ProjectSaveModal } from './components/ProjectSaveModal';
 import { RestoreErrorBanner } from './components/RestoreErrorBanner';
@@ -216,11 +219,12 @@ function OnboardingModal({
                       <textarea value={script} onChange={e => setScript(e.target.value)}
                         placeholder="Type your narration script here..."
                         className="w-full h-28 text-sm p-3 rounded-xl border border-gray-200 bg-white resize-none focus:outline-none focus:ring-2 focus:ring-violet-300 focus:border-violet-400 text-gray-700 placeholder:text-gray-400" />
-                      <div className="flex gap-2">
+                      <div className="flex items-center gap-2">
                         <select value={selectedVoice} onChange={e => setSelectedVoice(e.target.value)}
                           className="flex-1 text-sm border border-gray-200 rounded-xl px-3 py-2.5 bg-white text-gray-700 focus:outline-none focus:ring-2 focus:ring-violet-300">
                           {VOICES.map(v => <option key={v} value={v}>{v}</option>)}
                         </select>
+                        {script.trim() && <CostEstimateBadge estimate={estimateTtsCost(script.length)} />}
                         <button onClick={handleVoiceoverAction} disabled={!script.trim() || isGenerating}
                           className="flex items-center gap-2 px-5 py-2.5 bg-violet-600 hover:bg-violet-700 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-semibold rounded-xl transition-all">
                           {isGenerating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Mic2 className="w-4 h-4" />}
@@ -231,11 +235,18 @@ function OnboardingModal({
                   )}
                   {voiceoverMethod === 'auto' && (
                     <motion.div key="auto-in" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden">
-                      <div className="flex gap-2">
+                      <div className="flex items-center gap-2">
                         <select value={selectedVoice} onChange={e => setSelectedVoice(e.target.value)}
                           className="flex-1 text-sm border border-gray-200 rounded-xl px-3 py-2.5 bg-white text-gray-700 focus:outline-none focus:ring-2 focus:ring-violet-300">
                           {VOICES.map(v => <option key={v} value={v}>{v}</option>)}
                         </select>
+                        {videoClips.length > 0 && (
+                          <CostEstimateBadge
+                            estimate={estimateNarrationFlowCost(
+                              videoClips.map(c => ({ durationSec: c.duration, analysisChars: c.analysis?.length ?? null }))
+                            )}
+                          />
+                        )}
                         <button onClick={handleVoiceoverAction} disabled={isGenerating}
                           className="flex items-center gap-2 px-5 py-2.5 bg-violet-600 hover:bg-violet-700 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-semibold rounded-xl transition-all">
                           {isGenerating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
@@ -422,10 +433,10 @@ export default function App() {
     try {
       const result = await generateAudioFromScript(script, voice);
       replaceVoiceover({ url: result.url, duration: result.duration, transcription: result.transcription });
-      showToast('success', 'Voiceover audio generated');
+      toast.success('Voiceover audio generated');
     } catch (err) {
       console.error('TTS generation failed:', err);
-      showToast('error', `Failed to generate audio: ${err instanceof Error ? err.message : String(err)}`);
+      toast.error(`Failed to generate audio: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       setIsGeneratingAudio(false);
     }
@@ -444,10 +455,10 @@ export default function App() {
         updatedClips.map(c => ({ name: c.name, analysis: c.analysis ?? '', duration: c.duration })), voice
       );
       replaceVoiceover({ url: result.url, duration: result.duration, transcription: result.transcription });
-      showToast('success', 'Narration voiceover generated');
+      toast.success('Narration voiceover generated');
     } catch (err) {
       console.error('Narration generation failed:', err);
-      showToast('error', `Failed to generate narration: ${err instanceof Error ? err.message : String(err)}`);
+      toast.error(`Failed to generate narration: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       setIsGeneratingAudio(false);
     }
@@ -504,7 +515,7 @@ export default function App() {
       setVideoClips(chainClips(orderedClips));
     } catch (error) {
       console.error('Alignment failed:', error);
-      showToast('error', 'Failed to align clips. Please try again.');
+      toast.error('Failed to align clips. Please try again.');
     } finally {
       setIsAligning(false);
     }

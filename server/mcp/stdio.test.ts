@@ -53,8 +53,14 @@ describe('syncro MCP server over stdio (scripted inspector)', () => {
       const { tools } = await client.listTools();
       expect(tools.map((t) => t.name).sort()).toEqual([
         'attach_media',
+        'create_project',
+        'delete_project',
+        'generate_captions',
+        'generate_narration',
+        'generate_tts',
         'get_project',
         'list_projects',
+        'update_project',
         'upload_media',
       ]);
       const getProject = tools.find((t) => t.name === 'get_project');

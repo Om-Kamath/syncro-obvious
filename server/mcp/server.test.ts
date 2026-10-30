@@ -32,7 +32,15 @@ describe('syncro MCP read tools (in process)', () => {
     const client = await connectTools((async () => new Response('[]', { status: 200 })) as FetchLike);
     try {
       const { tools } = await client.listTools();
-      expect(tools.map((t) => t.name).sort()).toEqual(['attach_media', 'get_project', 'list_projects', 'upload_media']);
+      expect(tools.map((t) => t.name).sort()).toEqual([
+        'attach_media',
+        'create_project',
+        'delete_project',
+        'get_project',
+        'list_projects',
+        'update_project',
+        'upload_media',
+      ]);
       expect(tools.find((t) => t.name === 'get_project')?.annotations).toMatchObject({ readOnlyHint: true });
       expect(tools.find((t) => t.name === 'list_projects')?.annotations).toMatchObject({ readOnlyHint: true });
     } finally {
