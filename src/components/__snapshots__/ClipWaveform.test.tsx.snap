@@ -1,0 +1,27 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`ClipWaveform > renders a dimmed waveform container when given the muted palette (snapshot) 1`] = `
+<div
+  aria-hidden="true"
+  class="h-full w-full overflow-hidden"
+  data-clip-waveform="ready"
+  style="visibility: visible;"
+>
+  <div
+    class="h-full w-full"
+  />
+</div>
+`;
+
+exports[`Timeline clip waveforms > matches a snapshot of the muted clip waveform state (snapshot) 1`] = `
+<div
+  aria-hidden="true"
+  class="h-full w-full overflow-hidden"
+  data-clip-waveform="ready"
+  style="visibility: visible;"
+>
+  <div
+    class="h-full w-full"
+  />
+</div>
+`;
