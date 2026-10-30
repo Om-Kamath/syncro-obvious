@@ -4,11 +4,12 @@ import { VideoClip, Voiceover, TransitionType } from '../types';
 import { ClipWaveform } from './ClipWaveform';
 import { Play, Pause, Scissors, Wand2, Video, Plus, Minus, Maximize2, Zap, Layers, Star, Trash2, AlertTriangle, Keyboard } from 'lucide-react';
 import { DEFAULT_PPS, fitPixelsPerSecond, stepPixelsPerSecond } from '../utils/timelineZoom';
-import { findClipAtPlayhead, splitClipsAtPlayhead } from '../utils/clipSplit';
 import { selectionReducer, initialSelection, clipIdsInRect, type SelectionAction } from '../utils/selectionReducer';
 import { collectSnapCandidates, findSnap } from '../utils/timelineSnap';
 import { estimateAlignmentFlowCost } from '../services/costEstimate';
 import { CostEstimateBadge } from './CostEstimateBadge';
+import { reorderClips } from '../utils/reorderClips';
+import { findClipAtPlayhead, splitClipsAtPlayhead } from '../utils/clipSplit';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 
@@ -315,7 +316,24 @@ export const Timeline: React.FC<TimelineProps> = ({
         return { ...c, startTime: Math.max(0, start.startTime + groupDeltaTime), track: Math.max(0, start.track + trackDelta) };
       }));
     };
-    const onUp = () => { clipDragRef.current = null; setDraggingClipId(null); onVideoClipChange(resolveOverlaps(videoClipsRef.current)); };
+    const onUp = () => {
+      const drag = clipDragRef.current;
+      clipDragRef.current = null;
+      setDraggingClipId(null);
+      if (!drag) return;
+      if (drag.group.length > 1) {
+        // Multi-select group drag: the group lands where dropped and
+        // collisions are truncated (PR #50 semantics). Only a single-clip
+        // drag reorders the sequence.
+        onVideoClipChange(resolveOverlaps(videoClipsRef.current));
+        return;
+      }
+      // Drop = reorder: the block takes its place in the sequence (crossing a
+      // neighbour's centre swaps past it) and every startTime is rechained, so
+      // array order ≙ chainClips output again.
+      const dropTime = videoClipsRef.current.find(c => c.id === drag.id)?.startTime ?? 0;
+      onVideoClipChange(reorderClips(videoClipsRef.current, drag.id, dropTime));
+    };
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);
     return () => { window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); };
