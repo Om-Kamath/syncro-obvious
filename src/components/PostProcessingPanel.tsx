@@ -31,6 +31,14 @@ import { EXPORT_PRESETS, DEFAULT_EXPORT_PRESET, computeDrawGeometry, type Export
 import { audioChannelsOf, mixAudio, sliceAudioWindow, toAudioBuffer } from '../utils/audioMix';
 import { MusicPanel, DEFAULT_MUSIC_VOLUME } from './MusicPanel';
 import { EXPORT_CODECS, DEFAULT_EXPORT_CODEC, selectMimeType, type ExportCodecId } from '../utils/exportCodecs';
+import {
+  QUALITY_PRESETS,
+  DEFAULT_QUALITY_PRESET,
+  computeExportDuration,
+  estimatePresetSizeBytes,
+  formatEstimatedSize,
+  type QualityPresetId,
+} from '../utils/qualityPresets';
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -798,6 +806,8 @@ function ExportTab({
     codecId,
     m => typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported(m)
   );
+  const [qualityId, setQualityId] = useState<QualityPresetId>(DEFAULT_QUALITY_PRESET);
+  const quality = QUALITY_PRESETS[qualityId];
   const stopRef = useRef<(() => void) | null>(null);
 
   const handleDownloadAsset = (url: string, name: string) => {
@@ -888,7 +898,11 @@ function ExportTab({
       ]);
 
       const { mimeType, ext } = selected;
-      const recorder = new MediaRecorder(combined, { mimeType });
+      const recorderOptions: MediaRecorderOptions = { mimeType };
+      if (quality.videoBitsPerSecond !== null) {
+        recorderOptions.videoBitsPerSecond = quality.videoBitsPerSecond;
+      }
+      const recorder = new MediaRecorder(combined, recorderOptions);
       const chunks: Blob[] = [];
       recorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
       recorder.onstop = () => {
@@ -964,6 +978,15 @@ function ExportTab({
   if (!hasContent) {
     return <LockedState message="Upload assets and run AI Auto-Align before exporting." />;
   }
+
+  const exportDuration = voiceover ? computeExportDuration(voiceover) : 0;
+  const estimatedSize = exportDuration > 0 ? estimatePresetSizeBytes(quality, exportDuration) : null;
+  const sizeNote =
+    estimatedSize !== null && quality.videoBitsPerSecond !== null
+      ? `Estimated size ≈ ${formatEstimatedSize(estimatedSize)} · ${exportDuration.toFixed(1)}s · ${(quality.videoBitsPerSecond / 1_000_000).toFixed(1)} Mbps video`
+      : quality.videoBitsPerSecond === null
+        ? 'Bitrate: browser-managed — size estimate unavailable'
+        : null;
 
   return (
     <div className="space-y-6">
@@ -1138,6 +1161,31 @@ function ExportTab({
                   {selected.label} instead.
                 </p>
               )}
+            </div>
+
+            <div className="space-y-2">
+              <p className="text-xs font-semibold text-gray-900">Quality</p>
+              <div className="grid grid-cols-4 gap-2">
+                {Object.values(QUALITY_PRESETS).map(q => (
+                  <button
+                    key={q.id}
+                    onClick={() => setQualityId(q.id)}
+                    disabled={isExporting}
+                    className={cn(
+                      'flex flex-col items-center gap-0.5 px-2 py-2 rounded-xl border text-xs font-semibold transition-all disabled:opacity-50',
+                      qualityId === q.id
+                        ? 'bg-violet-50 border-violet-400 text-violet-600'
+                        : 'bg-white border-gray-200 text-gray-600 hover:border-violet-300'
+                    )}
+                  >
+                    <span>{q.label}</span>
+                    <span className="text-[10px] font-normal text-gray-400 text-center leading-tight">
+                      {q.description}
+                    </span>
+                  </button>
+                ))}
+              </div>
+              {sizeNote && <p className="text-[10px] text-gray-400">{sizeNote}</p>}
             </div>
 
             {isExporting && (
