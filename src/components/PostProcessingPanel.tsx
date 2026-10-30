@@ -47,6 +47,7 @@ import {
   formatEstimatedSize,
   type QualityPresetId,
 } from '../utils/qualityPresets';
+
 import { drawCaptionOnCanvas } from '../utils/captionDraw';
 import {
   computeGifFramePlan,
@@ -57,6 +58,10 @@ import {
   GIF_WIDTH_OPTIONS,
   MAX_GIF_FRAMES,
 } from '../utils/gifExport';
+
+import { mixTimelineAudio } from '../utils/audioMixdown';
+import { encodeWav } from '../utils/wavEncoder';
+
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -931,6 +936,9 @@ function ExportTab({
 }) {
   const [isExporting, setIsExporting] = useState(false);
   const [exportProgress, setExportProgress] = useState(0);
+  const [isExportingAudio, setIsExportingAudio] = useState(false);
+  const [audioError, setAudioError] = useState<string | null>(null);
+  const [audioSkipped, setAudioSkipped] = useState<string[]>([]);
   const [presetId, setPresetId] = useState<ExportPresetId>(DEFAULT_EXPORT_PRESET);
   const preset = EXPORT_PRESETS[presetId];
   const [musicFile, setMusicFile] = useState<File | null>(null);
@@ -1121,6 +1129,7 @@ function ExportTab({
     }
   };
 
+
   const timelineSec = getTimelineDurationSec(videoClips, voiceover);
   const gifPlan = useMemo(
     () => computeGifFramePlan({ durationSec: timelineSec, fps: gifFps, width: gifWidth, preset }),
@@ -1154,6 +1163,25 @@ function ExportTab({
     } finally {
       setIsGifExporting(false);
       setGifProgress(0);
+    }
+  };
+
+  const handleExportAudio = async () => {
+    if (!voiceover && videoClips.length === 0) return;
+    setIsExportingAudio(true);
+    setAudioError(null);
+    setAudioSkipped([]);
+
+    try {
+      const { buffer, skippedSources } = await mixTimelineAudio(videoClips, voiceover);
+      const { downloadFile } = await import('../utils/exportUtils');
+      downloadFile(encodeWav(buffer), 'syncvoice-mixdown.wav');
+      setAudioSkipped(skippedSources);
+    } catch (e) {
+      setAudioError(e instanceof Error ? e.message : 'Audio export failed. Try again.');
+    } finally {
+      setIsExportingAudio(false);
+
     }
   };
 
@@ -1415,6 +1443,7 @@ function ExportTab({
         </div>
       )}
 
+
       {/* GIF Export */}
       <div className="space-y-3">
         <p className="text-xs font-bold uppercase tracking-widest text-violet-500">GIF Export</p>
@@ -1520,6 +1549,56 @@ function ExportTab({
             </div>
           </div>
         )}
+      </div>
+
+      {/* Audio-Only Export */}
+      <div className="space-y-3">
+        <p className="text-xs font-bold uppercase tracking-widest text-violet-500">Audio Export</p>
+        <div className="p-4 bg-gray-50 border border-gray-100 rounded-2xl space-y-4">
+          <div className="flex items-start gap-3">
+            <div className="w-9 h-9 bg-violet-100 text-violet-600 rounded-xl flex items-center justify-center flex-shrink-0">
+              <Music className="w-4 h-4" />
+            </div>
+            <div>
+              <p className="text-sm font-semibold text-gray-900">Export Mixed Audio (WAV)</p>
+              <p className="text-xs text-violet-500 mt-0.5">
+                Renders every clip's audio plus the voiceover into one 16-bit WAV —
+                no video, no real-time recording wait.
+              </p>
+            </div>
+          </div>
+
+          {audioError && (
+            <div className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+              {audioError}{' '}
+              <span className="text-red-400">
+                Check the sources play in the editor, then try again.
+              </span>
+            </div>
+          )}
+          {!audioError && audioSkipped.length > 0 && (
+            <div className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+              Skipped sources (no audio): {audioSkipped.join(', ')}
+            </div>
+          )}
+
+          <div className="flex gap-3 items-center">
+            <button
+              onClick={handleExportAudio}
+              disabled={isExportingAudio}
+              className="flex items-center gap-2 px-4 py-2.5 text-sm font-semibold bg-violet-600 text-white rounded-xl hover:bg-violet-500 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {isExportingAudio
+                ? <Loader2 className="w-4 h-4 animate-spin" />
+                : <Music className="w-4 h-4" />}
+              {isExportingAudio ? 'Mixing…' : 'Export WAV'}
+            </button>
+            <span className="flex items-center text-[10px] font-bold text-violet-500 uppercase tracking-wider">
+              16-bit · 44.1 kHz
+            </span>
+          </div>
+        </div>
+
       </div>
     </div>
   );
