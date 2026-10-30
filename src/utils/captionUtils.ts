@@ -1,4 +1,6 @@
-export type CaptionSegment = { text: string; start: number; end: number };
+import type { CaptionSegment } from '../types';
+
+export type { CaptionSegment };
 
 function pad2(n: number) { return String(Math.floor(n)).padStart(2, '0'); }
 function pad3(n: number) { return String(Math.floor(n)).padStart(3, '0'); }
