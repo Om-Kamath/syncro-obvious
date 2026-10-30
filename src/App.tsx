@@ -11,8 +11,8 @@ import type { TimelineShortcutAction } from './utils/keyboardShortcuts';
 import { ClipEditor } from './components/ClipEditor';
 import { VoiceoverEditor } from './components/VoiceoverEditor';
 import { LogPanel } from './components/LogPanel';
-import { ToastContainer } from './components/ToastContainer';
 import { toast } from './services/toastStore';
+import { ToastContainer } from './components/ToastContainer';
 import {
   analyzeVoiceover,
   analyzeVideo,
@@ -275,6 +275,8 @@ export default function App() {
   const [editingClipId, setEditingClipId] = useState<string | null>(null);
   const [showVoiceoverEditor, setShowVoiceoverEditor] = useState(false);
   const [captionsEnabled, setCaptionsEnabled] = useState(false);
+  const [muteOriginalAudio, setMuteOriginalAudio] = useState(false);
+  const [isPlaying, setIsPlaying] = useState(false);
   const [captionStyle, setCaptionStyle] = useState<CaptionStyle>(DEFAULT_CAPTION_STYLE);
   const [onboardingStep, setOnboardingStep] = useState<1 | 2 | null>(1);
   const [showExportModal, setShowExportModal] = useState(false);
@@ -356,15 +358,23 @@ export default function App() {
       if (video) {
         const relativeTime = (currentTime - activeClip.startTime) + (activeClip.trimStart ?? 0);
         if (Math.abs(video.currentTime - relativeTime) > 0.1) video.currentTime = relativeTime;
+        // The clip's own audio rides the same playhead as the voiceover
+        // waveform; muting is the user-facing toggle, not the play state.
+        if (isPlaying && video.paused) video.play().catch(() => {});
+        if (!isPlaying && !video.paused) video.pause();
+      }
+      for (const [id, v] of Object.entries(videoRefs.current)) {
+        if (id !== activeClip.id && !v.paused) v.pause();
       }
       return;
     }
+    Object.values(videoRefs.current).forEach(v => { if (!v.paused) v.pause(); });
     const last = sorted[sorted.length - 1];
     if (!last) return;
     setActiveVideoId(last.id);
     const lastVideo = videoRefs.current[last.id];
     if (lastVideo) lastVideo.currentTime = last.duration;
-  }, [currentTime, videoClips]);
+  }, [currentTime, videoClips, isPlaying]);
 
   const getVideoDuration = (url: string): Promise<number> =>
     new Promise(resolve => { const v = document.createElement('video'); v.src = url; v.onloadedmetadata = () => resolve(v.duration); v.onerror = () => resolve(0); });
@@ -870,7 +880,7 @@ export default function App() {
                       key={clip.id}
                       ref={(el) => { if (el) videoRefs.current[clip.id] = el; }}
                       src={clip.url}
-                      muted
+                      muted={muteOriginalAudio}
                       playsInline
                       className="absolute inset-0 w-full h-full object-contain"
                       style={style}
@@ -932,6 +942,10 @@ export default function App() {
             currentTime={currentTime}
             onTimeUpdate={setCurrentTime}
             onTransportReady={handleTransportReady}
+            isPlaying={isPlaying}
+            onIsPlayingChange={setIsPlaying}
+            muteOriginalAudio={muteOriginalAudio}
+            onMuteOriginalAudioChange={setMuteOriginalAudio}
           />
         </div>
       </main>
@@ -984,6 +998,8 @@ export default function App() {
                     onCaptionsEnabledChange={setCaptionsEnabled}
                     importedThumbnails={importedThumbnails}
                     onImportCaptions={handleImportCaptions}
+                    muteOriginalAudio={muteOriginalAudio}
+                    onMuteOriginalAudioChange={setMuteOriginalAudio}
                   />
                 </Suspense>
               </div>

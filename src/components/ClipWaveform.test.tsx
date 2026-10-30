@@ -69,6 +69,10 @@ function renderTimeline(clips: VideoClip[]) {
       isAligning={false}
       currentTime={0}
       onTimeUpdate={() => {}}
+      isPlaying={false}
+      onIsPlayingChange={() => {}}
+      muteOriginalAudio={false}
+      onMuteOriginalAudioChange={() => {}}
     />
   );
 }

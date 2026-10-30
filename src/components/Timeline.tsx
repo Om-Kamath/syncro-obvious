@@ -9,6 +9,7 @@ import { selectionReducer, initialSelection, clipIdsInRect, type SelectionAction
 import { collectSnapCandidates, findSnap } from '../utils/timelineSnap';
 import { estimateAlignmentFlowCost } from '../services/costEstimate';
 import { CostEstimateBadge } from './CostEstimateBadge';
+import { MuteOriginalAudioToggle } from './MuteOriginalAudioToggle';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 
@@ -39,6 +40,11 @@ interface TimelineProps {
   currentTime: number;
   onTimeUpdate: (time: number) => void;
   onTransportReady?: (transport: TimelineTransport | null) => void;
+  /** Lifted so App can mirror play state into the preview <video> elements. */
+  isPlaying: boolean;
+  onIsPlayingChange: (playing: boolean) => void;
+  muteOriginalAudio: boolean;
+  onMuteOriginalAudioChange: (muted: boolean) => void;
 }
 
 interface ClipDragState {
@@ -102,12 +108,15 @@ export const Timeline: React.FC<TimelineProps> = ({
   onTimeUpdate,
   onVoiceoverChange,
   onTransportReady,
+  isPlaying,
+  onIsPlayingChange,
+  muteOriginalAudio,
+  onMuteOriginalAudioChange,
 }) => {
   const waveformRef = useRef<HTMLDivElement>(null);
   const wavesurfer = useRef<WaveSurfer | null>(null);
   const trackAreaRef = useRef<HTMLDivElement>(null);
   const videoTracksContainerRef = useRef<HTMLDivElement>(null);
-  const [isPlaying, setIsPlaying] = useState(false);
   const [isDraggingPlayhead, setIsDraggingPlayhead] = useState(false);
   const [draggingClipId, setDraggingClipId] = useState<string | null>(null);
   const [draggingTrimId, setDraggingTrimId] = useState<string | null>(null);
@@ -227,7 +236,7 @@ export const Timeline: React.FC<TimelineProps> = ({
       const delta = (now - lastTime) / 1000;
       lastTime = now;
       const nextTime = currentTimeRef.current + delta;
-      if (nextTime >= totalDuration) { setIsPlaying(false); onTimeUpdate(totalDuration); if (wavesurfer.current?.isPlaying()) wavesurfer.current.pause(); return; }
+      if (nextTime >= totalDuration) { onIsPlayingChange(false); onTimeUpdate(totalDuration); if (wavesurfer.current?.isPlaying()) wavesurfer.current.pause(); return; }
       onTimeUpdate(nextTime);
       if (wavesurfer.current && voiceover) {
         const vStartTime = voiceover.startTime ?? 0;
@@ -242,7 +251,7 @@ export const Timeline: React.FC<TimelineProps> = ({
     };
     frameId = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(frameId);
-  }, [isPlaying, totalDuration, onTimeUpdate, voiceover]);
+  }, [isPlaying, totalDuration, onTimeUpdate, onIsPlayingChange, voiceover]);
 
   useEffect(() => {
     if (!isDraggingPlayhead) return;
@@ -394,19 +403,21 @@ export const Timeline: React.FC<TimelineProps> = ({
     return () => { window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); };
   }, [draggingTrimId]);
 
-  const togglePlay = () => setIsPlaying(p => !p);
+  const togglePlay = () => onIsPlayingChange(!isPlaying);
 
   // Imperative transport handle: the clock, its clamping, and the wavesurfer
-  // sync stay here — App's global shortcuts just press the buttons.
+  // sync stay here — App's global shortcuts just press the buttons. Play state
+  // is lifted to App, so the handle routes through the lifted callback; the
+  // effect re-registers on every play-state change to keep the closure fresh.
   useEffect(() => {
     if (!onTransportReady) return;
     onTransportReady({
-      togglePlay: () => setIsPlaying(p => !p),
-      pause: () => setIsPlaying(false),
+      togglePlay: () => onIsPlayingChange(!isPlaying),
+      pause: () => onIsPlayingChange(false),
       seekBy: (deltaSeconds: number) => seekToTime(currentTimeRef.current + deltaSeconds),
     });
     return () => onTransportReady(null);
-  }, [onTransportReady, seekToTime]);
+  }, [onTransportReady, seekToTime, isPlaying, onIsPlayingChange]);
 
   const handleTrackClick = (e: React.MouseEvent) => {
     if ((e.target as HTMLElement).closest('[data-clip]')) return;
@@ -513,6 +524,7 @@ export const Timeline: React.FC<TimelineProps> = ({
             {isPlaying ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
           </button>
           <span className="text-xs font-mono text-gray-400">{currentTime.toFixed(2)}s / {totalDuration.toFixed(2)}s</span>
+          <MuteOriginalAudioToggle muted={muteOriginalAudio} onChange={onMuteOriginalAudioChange} />
           <div className="w-px h-4 bg-gray-200" />
           <div className="flex items-center gap-1">
             <button
