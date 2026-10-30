@@ -755,7 +755,9 @@ export const Timeline: React.FC<TimelineProps> = ({
                                 </div>
                               </div>
 
-                              {/* Left trim */}
+                              {/* Left trim — the visible strip stays 10px, but an invisible
+                                  pseudo-element stretches the interactive target to 24px
+                                  inward (WCAG 2.5.8 minimum target size) without visual bloat. */}
                               <div
                                 data-trim-handle="left"
                                 role="slider"
@@ -766,7 +768,7 @@ export const Timeline: React.FC<TimelineProps> = ({
                                 aria-valuenow={Math.round((clip.trimStart ?? 0) * 10) / 10}
                                 onMouseDown={(e) => handleTrimHandleMouseDown(e, clip, 'left')}
                                 onKeyDown={(e) => handleTrimKeyDown(e, clip, 'left')}
-                                className={`absolute left-0 top-0 bottom-0 w-2.5 flex items-center justify-center cursor-col-resize rounded-l-xl z-10 opacity-0 group-hover/clip:opacity-100 focus-visible:opacity-100 transition-opacity bg-violet-500/80 hover:bg-violet-500 ${FOCUS_RING}`}
+                                className={`absolute left-0 top-0 bottom-0 w-2.5 flex items-center justify-center cursor-col-resize rounded-l-xl z-20 opacity-0 group-hover/clip:opacity-100 focus-visible:opacity-100 transition-opacity bg-violet-500/80 hover:bg-violet-500 after:absolute after:inset-y-0 after:left-0 after:-right-3.5 after:content-[''] ${FOCUS_RING}`}
                               >
                                 <div className="w-0.5 h-4 bg-white/70 rounded-full" />
                               </div>
@@ -785,7 +787,7 @@ export const Timeline: React.FC<TimelineProps> = ({
                                 <div className="relative z-10 text-[10px] truncate mt-0.5 italic" style={{ color: isActive || hasFilmstrip ? 'rgba(255,255,255,0.7)' : '#8b5cf6' }}>{clip.analysis}</div>
                               )}
 
-                              {/* Right trim */}
+                              {/* Right trim — same 24px invisible hit-area expansion as the left handle. */}
                               <div
                                 data-trim-handle="right"
                                 role="slider"
@@ -796,7 +798,7 @@ export const Timeline: React.FC<TimelineProps> = ({
                                 aria-valuenow={Math.round(effectiveDuration * 10) / 10}
                                 onMouseDown={(e) => handleTrimHandleMouseDown(e, clip, 'right')}
                                 onKeyDown={(e) => handleTrimKeyDown(e, clip, 'right')}
-                                className={`absolute right-0 top-0 bottom-0 w-2.5 flex items-center justify-center cursor-col-resize rounded-r-xl z-10 opacity-0 group-hover/clip:opacity-100 focus-visible:opacity-100 transition-opacity bg-orange-400/80 hover:bg-orange-400 ${FOCUS_RING}`}
+                                className={`absolute right-0 top-0 bottom-0 w-2.5 flex items-center justify-center cursor-col-resize rounded-r-xl z-20 opacity-0 group-hover/clip:opacity-100 focus-visible:opacity-100 transition-opacity bg-orange-400/80 hover:bg-orange-400 after:absolute after:inset-y-0 after:right-0 after:-left-3.5 after:content-[''] ${FOCUS_RING}`}
                               >
                                 <div className="w-0.5 h-4 bg-white/70 rounded-full" />
                               </div>
