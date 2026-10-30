@@ -1405,21 +1405,6 @@ function ExportTab({
   );
 }
 
-// ── Pick the best available recording format ─────────────────────────────────
-function pickMimeType(): { mimeType: string; ext: string; label: string } {
-  const candidates = [
-    { mimeType: 'video/mp4;codecs=avc1', ext: 'mp4', label: 'MP4 · H.264' },
-    { mimeType: 'video/mp4;codecs=h264', ext: 'mp4', label: 'MP4 · H.264' },
-    { mimeType: 'video/mp4', ext: 'mp4', label: 'MP4' },
-    { mimeType: 'video/webm;codecs=vp9', ext: 'webm', label: 'WebM · VP9' },
-    { mimeType: 'video/webm', ext: 'webm', label: 'WebM' },
-  ];
-  for (const c of candidates) {
-    if (MediaRecorder.isTypeSupported(c.mimeType)) return c;
-  }
-  return { mimeType: 'video/webm', ext: 'webm', label: 'WebM' };
-}
-
 // ═══════════════════════════════════════════════════════════════════════════
 // MAIN PANEL
 // ═══════════════════════════════════════════════════════════════════════════
