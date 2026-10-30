@@ -766,7 +766,7 @@ export const Timeline: React.FC<TimelineProps> = ({
                                 aria-valuenow={Math.round((clip.trimStart ?? 0) * 10) / 10}
                                 onMouseDown={(e) => handleTrimHandleMouseDown(e, clip, 'left')}
                                 onKeyDown={(e) => handleTrimKeyDown(e, clip, 'left')}
-                                className={`absolute left-0 top-0 bottom-0 w-2.5 flex items-center justify-center cursor-col-resize rounded-l-xl z-10 opacity-0 group-hover/clip:opacity-100 focus-visible:opacity-100 transition-opacity bg-violet-500/80 hover:bg-violet-500 ${FOCUS_RING}`}
+                                className={`absolute left-0 top-0 bottom-0 w-2.5 flex items-center justify-center cursor-col-resize rounded-l-xl z-10 opacity-0 group-hover/clip:opacity-100 focus-visible:opacity-100 transition-opacity motion-reduce:transition-none bg-violet-500/80 hover:bg-violet-500 ${FOCUS_RING}`}
                               >
                                 <div className="w-0.5 h-4 bg-white/70 rounded-full" />
                               </div>
@@ -796,7 +796,7 @@ export const Timeline: React.FC<TimelineProps> = ({
                                 aria-valuenow={Math.round(effectiveDuration * 10) / 10}
                                 onMouseDown={(e) => handleTrimHandleMouseDown(e, clip, 'right')}
                                 onKeyDown={(e) => handleTrimKeyDown(e, clip, 'right')}
-                                className={`absolute right-0 top-0 bottom-0 w-2.5 flex items-center justify-center cursor-col-resize rounded-r-xl z-10 opacity-0 group-hover/clip:opacity-100 focus-visible:opacity-100 transition-opacity bg-orange-400/80 hover:bg-orange-400 ${FOCUS_RING}`}
+                                className={`absolute right-0 top-0 bottom-0 w-2.5 flex items-center justify-center cursor-col-resize rounded-r-xl z-10 opacity-0 group-hover/clip:opacity-100 focus-visible:opacity-100 transition-opacity motion-reduce:transition-none bg-orange-400/80 hover:bg-orange-400 ${FOCUS_RING}`}
                               >
                                 <div className="w-0.5 h-4 bg-white/70 rounded-full" />
                               </div>
