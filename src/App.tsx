@@ -36,6 +36,7 @@ import {
 import { setApiKey, hasApiKey } from './services/apiKey';
 import { chainClips } from './utils/chainClips';
 import { resolveWordTimings, findActiveWordIndex } from './utils/wordTiming';
+import { captureFilmstrip } from './utils/clipThumbnails';
 import { motion, AnimatePresence } from 'motion/react';
 
 // Heavy Gemini export UI — code-split so it lands in its own chunk and is
@@ -46,6 +47,24 @@ const PostProcessingPanel = React.lazy(() =>
 
 function cn(...classes: (string | boolean | undefined | null)[]): string {
   return classes.filter(Boolean).join(' ');
+}
+
+// Kick off filmstrip generation per imported clip; updates state as each strip
+// lands. Clips render in their plain style until then — the filmstrip is a
+// progressive enhancement, so a total capture failure only downgrades visuals.
+function attachFilmstrips(
+  clips: VideoClip[],
+  setVideoClips: (update: (prev: VideoClip[]) => VideoClip[]) => void,
+) {
+  for (const clip of clips) {
+    if (clip.duration <= 0) continue;
+    captureFilmstrip(clip.url, clip.duration)
+      .then(thumbnails => {
+        if (thumbnails.length === 0) return;
+        setVideoClips(prev => prev.map(c => (c.id === clip.id ? { ...c, thumbnails } : c)));
+      })
+      .catch(err => console.warn(`Filmstrip capture failed for "${clip.name}"`, err));
+  }
 }
 
 function CaptionOverlay({
@@ -339,6 +358,7 @@ export default function App() {
       return { id: Math.random().toString(36).substr(2, 9), file, url, duration, startTime: 0, name: file.name };
     }));
     setVideoClips(prev => [...prev, ...newClips]);
+    attachFilmstrips(newClips, setVideoClips);
   };
 
   const handleVoiceoverUpload = async (files: File[]) => {
