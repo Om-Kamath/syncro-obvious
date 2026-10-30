@@ -27,3 +27,7 @@ A narration-first video editor in the browser: import clips, generate narration 
 | `npm test` | Run Vitest tests |
 | `npm run lint` | Type-check (`tsc --noEmit`) + ESLint |
 | `npm run clean` | Remove `dist/` |
+
+## Agents (MCP)
+
+Syncro ships an MCP (Model Context Protocol) server so AI agents can list saved projects, inspect project state and timelines, and trigger exports without the UI. See [MCP.md](MCP.md) for the tool reference, launch instructions, and ready-made Claude Desktop / generic agent configs.
