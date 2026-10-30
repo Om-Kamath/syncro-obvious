@@ -2,7 +2,7 @@ import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
   test: {
-    include: ['src/**/*.test.{ts,tsx}'],
+    // Per-file override via `@vitest-environment jsdom` for DOM tests.
     environment: 'node',
   },
 });
