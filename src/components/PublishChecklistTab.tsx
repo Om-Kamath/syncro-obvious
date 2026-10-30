@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   Check,
   Circle,
@@ -21,7 +21,14 @@ import {
   formatChapterLines,
   formatChapterTime,
 } from '../utils/platformCopy';
-import { PLATFORM_PRESETS, type PlatformId } from '../utils/platformPresets';
+import { PLATFORM_PRESETS } from '../utils/platformPresets';
+import {
+  choosePlatform,
+  saveChecklistState,
+  setPlatformChoices,
+  tryLoadChecklistState,
+  type PublishChecklistState,
+} from '../services/publishChecklistStore';
 import { CopyButton } from './CopyButton';
 
 // ── Section card with ready/pending badge ────────────────────────────────────
@@ -81,8 +88,15 @@ interface PublishChecklistTabProps {
  * chapters — each with copy or download actions and a ready/pending state.
  */
 export function PublishChecklistTab({ voiceover, description, thumbnails }: PublishChecklistTabProps) {
-  const [title, setTitle] = useState('');
-  const [platform, setPlatform] = useState<PlatformId>('youtube');
+  // Persisted choices are the single source of truth: restored on mount and
+  // saved on every change, so title and platform survive a reload.
+  const [checklist, setChecklist] = useState<PublishChecklistState>(() => tryLoadChecklistState());
+  const platform = checklist.activePlatform;
+  const title = checklist.platforms[platform]?.title ?? '';
+
+  useEffect(() => {
+    saveChecklistState(checklist);
+  }, [checklist]);
 
   const segments = voiceover?.segments ?? [];
   const hasTitle = title.trim().length > 0;
@@ -147,7 +161,7 @@ export function PublishChecklistTab({ voiceover, description, thumbnails }: Publ
         <div className="flex items-center gap-3">
           <input
             value={title}
-            onChange={e => setTitle(e.target.value)}
+            onChange={e => setChecklist(c => setPlatformChoices(c, platform, { title: e.target.value }))}
             aria-label="Video title"
             placeholder="Add your video title…"
             className="flex-1 px-3 py-2 text-sm bg-white border border-gray-200 rounded-xl text-gray-900 placeholder:text-gray-400 focus:outline-none focus:border-violet-400 focus:ring-1 focus:ring-violet-300"
@@ -184,7 +198,7 @@ export function PublishChecklistTab({ voiceover, description, thumbnails }: Publ
           {Object.values(PLATFORM_PRESETS).map(p => (
             <button
               key={p.id}
-              onClick={() => setPlatform(p.id)}
+              onClick={() => setChecklist(c => choosePlatform(c, p.id))}
               aria-pressed={platform === p.id}
               className={
                 'py-1.5 px-1 text-xs font-semibold rounded-xl border transition-all ' +
