@@ -33,3 +33,22 @@ export function fitPixelsPerSecond(contentSeconds: number, availableWidth: numbe
   const fitSeconds = contentSeconds + FIT_PADDING_SECONDS;
   return clampPixelsPerSecond(usable / fitSeconds);
 }
+
+/** Minimum horizontal spacing (px) between ruler labels before they collide. */
+export const RULER_MIN_LABEL_SPACING_PX = 40;
+
+/** "Nice" label intervals (seconds) the ruler may step through. */
+const RULER_LABEL_STEPS = [1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 1200, 1800, 3600];
+
+/**
+ * Smallest "nice" interval (in seconds) whose tick labels stay at least
+ * RULER_MIN_LABEL_SPACING_PX apart at `pps`, so ruler text never collides
+ * when the timeline is zoomed out and ticks get dense.
+ */
+export function rulerLabelStep(pps: number): number {
+  const minStep = Math.max(1, Math.ceil(RULER_MIN_LABEL_SPACING_PX / Math.max(pps, Number.EPSILON)));
+  for (const step of RULER_LABEL_STEPS) {
+    if (step >= minStep) return step;
+  }
+  return RULER_LABEL_STEPS[RULER_LABEL_STEPS.length - 1];
+}

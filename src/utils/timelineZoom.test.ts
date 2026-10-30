@@ -5,6 +5,8 @@ import {
   fitPixelsPerSecond,
   MAX_PPS,
   MIN_PPS,
+  RULER_MIN_LABEL_SPACING_PX,
+  rulerLabelStep,
   stepPixelsPerSecond,
   ZOOM_STEP_FACTOR,
 } from './timelineZoom';
@@ -66,5 +68,29 @@ describe('fitPixelsPerSecond', () => {
     const width = 900;
     const pps = fitPixelsPerSecond(contentSeconds, width);
     expect(contentSeconds * pps).toBeLessThanOrEqual(width);
+  });
+});
+
+describe('rulerLabelStep', () => {
+  it('labels every second while there is room', () => {
+    expect(rulerLabelStep(DEFAULT_PPS)).toBe(1);
+    expect(rulerLabelStep(MAX_PPS)).toBe(1);
+  });
+
+  it('thins labels out as ticks get dense (zoomed out)', () => {
+    expect(rulerLabelStep(25)).toBe(2);
+    expect(rulerLabelStep(20)).toBe(2);
+    expect(rulerLabelStep(19)).toBe(5);
+    expect(rulerLabelStep(MIN_PPS)).toBe(5);
+  });
+
+  it('never returns a step whose labels would collide', () => {
+    for (let pps = MIN_PPS; pps <= MAX_PPS; pps++) {
+      expect(rulerLabelStep(pps) * pps).toBeGreaterThanOrEqual(RULER_MIN_LABEL_SPACING_PX);
+    }
+  });
+
+  it('stays finite and positive for a degenerate scale', () => {
+    expect(rulerLabelStep(0)).toBeGreaterThan(0);
   });
 });
