@@ -1,23 +1,20 @@
-import type { CaptionStyle, TransitionType } from '../../src/types';
-import type { ProjectPayload, ProjectState, SerializedClip, SerializedClipAlternative, SerializedVoiceover, SerializedVoiceoverSegment } from './types';
+import type { ProjectStatePayload, SerializedClip, SerializedVoiceover } from './apiClient';
+import type { CaptionStyle } from '../../src/types';
+import { ToolFailure } from './results';
 
 /**
- * Input validation for the project mutation tools.
+ * Deep input validation for the project mutation tools.
  *
- * Hand-rolled (no schema library) so error messages name the offending path
- * (`clips[0].duration must be >= 0`) — an agent can fix its payload in one
- * round trip. Semantics and message formats mirror the projects API
- * validator (`server/projects/projectState.ts`), so a payload accepted here
- * is accepted by the API and vice versa.
+ * The Syncro server currently performs no ProjectState validation of its own
+ * (see `server/app.ts`), and MCP callers reach it without the browser UI's
+ * editor invariants. This module is the write-path gate: it turns arbitrary
+ * JSON-RPC arguments into a normalized `ProjectStatePayload` or a
+ * `StateValidationFailure` whose message names the offending path
+ * (`clips[0].duration must be >= 0`) so an agent can fix its own input.
  */
 
-/** Thrown for tool arguments that violate the project contract. */
-export class ValidationError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'ValidationError';
-  }
-}
+/** Expected validation failure — rendered as an `isError` tool result. */
+export class StateValidationFailure extends ToolFailure {}
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -25,163 +22,211 @@ function isRecord(value: unknown): value is UnknownRecord {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-function requireString(value: unknown, path: string): string {
-  if (typeof value !== 'string' || value.trim().length === 0) {
-    throw new ValidationError(`${path} must be a non-empty string`);
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value);
+}
+
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === 'string' && value.trim().length > 0;
+}
+
+function isOptionalString(value: unknown): value is string | undefined {
+  return value === undefined || typeof value === 'string';
+}
+
+function nonEmptyString(value: unknown, path: string): string {
+  if (!isNonEmptyString(value)) {
+    throw new StateValidationFailure(`${path} must be a non-empty string`);
   }
   return value;
 }
 
-/** Free-form string field: any string accepted when present (may be empty). */
-function optionalString(value: unknown, path: string): string | undefined {
+function nonNegativeNumber(value: unknown, path: string): number {
+  if (!isFiniteNumber(value) || value < 0) {
+    throw new StateValidationFailure(`${path} must be >= 0`);
+  }
+  return value;
+}
+
+function optionalNonNegativeNumber(value: unknown, path: string): number | undefined {
   if (value === undefined) return undefined;
-  if (typeof value !== 'string') throw new ValidationError(`${path} must be a string`);
-  return value;
+  return nonNegativeNumber(value, path);
 }
 
-function requireNumber(value: unknown, path: string, min?: number, max?: number): number {
-  if (typeof value !== 'number' || !Number.isFinite(value)) {
-    throw new ValidationError(`${path} must be a finite number`);
+const TRANSITIONS = ['cut', 'fade', 'dissolve', 'wipe'] as const;
+const CAPTION_MODES = ['lower-third', 'word-highlight', 'speaker-labeled'] as const;
+const CAPTION_POSITIONS = ['bottom', 'top'] as const;
+
+/** Prove membership and return the narrowed literal type. */
+function oneOf<T extends string>(value: unknown, allowed: readonly T[], path: string): T {
+  if (typeof value !== 'string' || !(allowed as readonly string[]).includes(value)) {
+    throw new StateValidationFailure(`${path} must be one of ${allowed.join(', ')}`);
   }
-  if (min !== undefined && value < min) throw new ValidationError(`${path} must be >= ${min}`);
-  if (max !== undefined && value > max) throw new ValidationError(`${path} must be <= ${max}`);
-  return value;
+  // Membership was just proven against the allowed list; the cast only reifies it.
+  return value as T;
 }
 
-function optionalNumber(value: unknown, path: string, min?: number, max?: number): number | undefined {
-  return value === undefined ? undefined : requireNumber(value, path, min, max);
-}
-
-function optionalInteger(value: unknown, path: string, min?: number): number | undefined {
+function normalizeAlternatives(value: unknown, path: string): SerializedClip['alternatives'] {
   if (value === undefined) return undefined;
-  if (typeof value !== 'number' || !Number.isInteger(value)) {
-    throw new ValidationError(`${path} must be an integer`);
+  if (!Array.isArray(value)) {
+    throw new StateValidationFailure(`${path} must be an array`);
   }
-  if (min !== undefined && value < min) throw new ValidationError(`${path} must be >= ${min}`);
-  return value;
-}
-
-function requireBoolean(value: unknown, path: string): boolean {
-  if (typeof value !== 'boolean') throw new ValidationError(`${path} must be a boolean`);
-  return value;
-}
-
-function requireOneOf<T extends string>(value: unknown, path: string, allowed: readonly T[]): T {
-  const match = allowed.find((candidate) => candidate === value);
-  if (match === undefined) {
-    throw new ValidationError(`${path} must be one of: ${allowed.join(', ')}`);
-  }
-  return match;
-}
-
-const TRANSITIONS: readonly TransitionType[] = ['cut', 'fade', 'dissolve', 'wipe'];
-const CAPTION_MODES: readonly CaptionStyle['mode'][] = ['lower-third', 'word-highlight', 'speaker-labeled'];
-const CAPTION_POSITIONS: readonly CaptionStyle['position'][] = ['bottom', 'top'];
-
-function parseCaptionStyle(value: unknown): CaptionStyle {
-  if (!isRecord(value)) throw new ValidationError('captionStyle must be an object');
-  const fontSize = requireNumber(value.fontSize, 'captionStyle.fontSize');
-  if (fontSize <= 0) throw new ValidationError('captionStyle.fontSize must be > 0');
-  return {
-    mode: requireOneOf(value.mode, 'captionStyle.mode', CAPTION_MODES),
-    fontSize,
-    color: requireString(value.color, 'captionStyle.color'),
-    bgColor: requireString(value.bgColor, 'captionStyle.bgColor'),
-    position: requireOneOf(value.position, 'captionStyle.position', CAPTION_POSITIONS),
-  };
-}
-
-function parseSegments(value: unknown): SerializedVoiceoverSegment[] | undefined {
-  if (value === undefined) return undefined;
-  if (!Array.isArray(value)) throw new ValidationError('voiceover.segments must be an array');
-  return value.map((segment, i) => {
-    const path = `voiceover.segments[${i}]`;
-    if (!isRecord(segment)) throw new ValidationError(`${path} must be an object`);
-    const start = requireNumber(segment.start, `${path}.start`, 0);
-    const end = requireNumber(segment.end, `${path}.end`, 0);
-    if (start > end) throw new ValidationError(`${path}.start must be <= ${path}.end`);
+  return value.map((entry, index) => {
+    const altPath = `${path}[${index}]`;
+    if (!isRecord(entry)) {
+      throw new StateValidationFailure(`${altPath} must be an object`);
+    }
+    const confidence = entry.confidence;
+    if (!isFiniteNumber(confidence) || confidence < 0 || confidence > 1) {
+      throw new StateValidationFailure(`${altPath}.confidence must be a number between 0 and 1`);
+    }
     return {
-      text: requireString(segment.text, `${path}.text`),
-      start,
-      end,
+      id: nonEmptyString(entry.id, `${altPath}.id`),
+      confidence,
+      reason: nonEmptyString(entry.reason, `${altPath}.reason`),
     };
   });
 }
 
-function parseVoiceover(value: unknown): SerializedVoiceover | null {
+function normalizeClip(value: unknown, index: number): SerializedClip {
+  const path = `clips[${index}]`;
+  if (!isRecord(value)) {
+    throw new StateValidationFailure(`${path} must be an object`);
+  }
+  const clip = {
+    id: nonEmptyString(value.id, `${path}.id`),
+    name: nonEmptyString(value.name, `${path}.name`),
+    duration: nonNegativeNumber(value.duration, `${path}.duration`),
+    startTime: nonNegativeNumber(value.startTime, `${path}.startTime`),
+    trimmedDuration: optionalNonNegativeNumber(value.trimmedDuration, `${path}.trimmedDuration`),
+    trimStart: optionalNonNegativeNumber(value.trimStart, `${path}.trimStart`),
+    textOverlay: isOptionalString(value.textOverlay) ? value.textOverlay : undefined,
+    track: value.track === undefined ? undefined : nonNegativeNumber(value.track, `${path}.track`),
+    transitionIn: value.transitionIn === undefined ? undefined : oneOf(value.transitionIn, TRANSITIONS, `${path}.transitionIn`),
+    analysis: isOptionalString(value.analysis) ? value.analysis : undefined,
+    alternatives: normalizeAlternatives(value.alternatives, `${path}.alternatives`),
+  };
+  if (clip.track !== undefined && !Number.isInteger(clip.track)) {
+    throw new StateValidationFailure(`${path}.track must be a non-negative integer`);
+  }
+  return clip;
+}
+
+function normalizeWord(value: unknown, wordsPath: string, index: number): { word: string; start: number; end: number } {
+  const path = `${wordsPath}[${index}]`;
+  if (!isRecord(value)) {
+    throw new StateValidationFailure(`${path} must be an object`);
+  }
+  const start = nonNegativeNumber(value.start, `${path}.start`);
+  const end = nonNegativeNumber(value.end, `${path}.end`);
+  if (start > end) {
+    throw new StateValidationFailure(`${path}.start must be <= ${path}.end`);
+  }
+  return { word: nonEmptyString(value.word, `${path}.word`), start, end };
+}
+
+function normalizeSegment(value: unknown, segmentsPath: string, index: number): {
+  text: string;
+  start: number;
+  end: number;
+  words?: { word: string; start: number; end: number }[];
+} {
+  const path = `${segmentsPath}[${index}]`;
+  if (!isRecord(value)) {
+    throw new StateValidationFailure(`${path} must be an object`);
+  }
+  const start = nonNegativeNumber(value.start, `${path}.start`);
+  const end = nonNegativeNumber(value.end, `${path}.end`);
+  if (start > end) {
+    throw new StateValidationFailure(`${path}.start must be <= ${path}.end`);
+  }
+  const segment: { text: string; start: number; end: number; words?: { word: string; start: number; end: number }[] } = {
+    text: nonEmptyString(value.text, `${path}.text`),
+    start,
+    end,
+  };
+  if (value.words !== undefined) {
+    if (!Array.isArray(value.words)) {
+      throw new StateValidationFailure(`${path}.words must be an array`);
+    }
+    segment.words = value.words.map((word, wordIndex) => normalizeWord(word, `${path}.words`, wordIndex));
+  }
+  return segment;
+}
+
+function normalizeVoiceover(value: unknown): SerializedVoiceover | null {
   if (value === undefined || value === null) return null;
-  if (!isRecord(value)) throw new ValidationError('voiceover must be an object or null');
-  return {
-    duration: requireNumber(value.duration, 'voiceover.duration', 0),
-    trimStart: optionalNumber(value.trimStart, 'voiceover.trimStart', 0),
-    trimEnd: optionalNumber(value.trimEnd, 'voiceover.trimEnd', 0),
-    transcription: optionalString(value.transcription, 'voiceover.transcription'),
-    segments: parseSegments(value.segments),
-    startTime: optionalNumber(value.startTime, 'voiceover.startTime', 0),
-  };
+  if (!isRecord(value)) {
+    throw new StateValidationFailure('voiceover must be an object or null');
+  }
+  const duration = nonNegativeNumber(value.duration, 'voiceover.duration');
+  const trimStart = optionalNonNegativeNumber(value.trimStart, 'voiceover.trimStart');
+  const trimEnd = optionalNonNegativeNumber(value.trimEnd, 'voiceover.trimEnd');
+  if (trimStart !== undefined && trimEnd !== undefined && trimEnd < trimStart) {
+    throw new StateValidationFailure('voiceover.trimEnd must be >= voiceover.trimStart');
+  }
+  const voiceover: SerializedVoiceover = { duration, trimStart, trimEnd, startTime: optionalNonNegativeNumber(value.startTime, 'voiceover.startTime') };
+  if (value.transcription !== undefined) {
+    if (typeof value.transcription !== 'string') {
+      throw new StateValidationFailure('voiceover.transcription must be a string');
+    }
+    voiceover.transcription = value.transcription;
+  }
+  if (value.segments !== undefined) {
+    if (!Array.isArray(value.segments)) {
+      throw new StateValidationFailure('voiceover.segments must be an array');
+    }
+    voiceover.segments = value.segments.map((segment, index) => normalizeSegment(segment, 'voiceover.segments', index));
+  }
+  return voiceover;
 }
 
-function parseAlternatives(value: unknown, parentPath: string): SerializedClipAlternative[] | undefined {
-  if (value === undefined) return undefined;
-  if (!Array.isArray(value)) throw new ValidationError(`${parentPath} must be an array`);
-  return value.map((alternative, i) => {
-    const path = `${parentPath}[${i}]`;
-    if (!isRecord(alternative)) throw new ValidationError(`${path} must be an object`);
-    return {
-      id: requireString(alternative.id, `${path}.id`),
-      confidence: requireNumber(alternative.confidence, `${path}.confidence`, 0, 1),
-      reason: requireString(alternative.reason, `${path}.reason`),
-    };
-  });
-}
-
-function parseClip(value: unknown, path: string): SerializedClip {
-  if (!isRecord(value)) throw new ValidationError(`${path} must be an object`);
+function normalizeCaptionStyle(value: unknown): CaptionStyle {
+  if (!isRecord(value)) {
+    throw new StateValidationFailure('captionStyle must be an object');
+  }
+  if (!isFiniteNumber(value.fontSize) || value.fontSize <= 0) {
+    throw new StateValidationFailure('captionStyle.fontSize must be > 0');
+  }
+  if (typeof value.color !== 'string' || typeof value.bgColor !== 'string') {
+    throw new StateValidationFailure('captionStyle.color and captionStyle.bgColor must be strings');
+  }
   return {
-    id: requireString(value.id, `${path}.id`),
-    name: requireString(value.name, `${path}.name`),
-    duration: requireNumber(value.duration, `${path}.duration`, 0),
-    startTime: requireNumber(value.startTime, `${path}.startTime`, 0),
-    trimmedDuration: optionalNumber(value.trimmedDuration, `${path}.trimmedDuration`, 0),
-    trimStart: optionalNumber(value.trimStart, `${path}.trimStart`, 0),
-    textOverlay: optionalString(value.textOverlay, `${path}.textOverlay`),
-    track: optionalInteger(value.track, `${path}.track`, 0),
-    transitionIn:
-      value.transitionIn === undefined
-        ? undefined
-        : requireOneOf(value.transitionIn, `${path}.transitionIn`, TRANSITIONS),
-    analysis: optionalString(value.analysis, `${path}.analysis`),
-    alternatives: parseAlternatives(value.alternatives, `${path}.alternatives`),
+    mode: oneOf(value.mode, CAPTION_MODES, 'captionStyle.mode'),
+    fontSize: value.fontSize,
+    color: value.color,
+    bgColor: value.bgColor,
+    position: oneOf(value.position, CAPTION_POSITIONS, 'captionStyle.position'),
   };
 }
 
 /**
- * Validate and normalize an incoming ProjectState. Returns a whitelist-built
- * object: unknown keys (including browser-only `file`/`url` handles) are
- * dropped, required fields must be present and well-typed.
+ * Validate an untrusted project-state value and return a normalized copy:
+ * unknown keys are dropped, an omitted `voiceover` becomes `null`, and
+ * everything else is checked field by field.
  */
-export function parseProjectState(value: unknown): ProjectState {
-  if (!isRecord(value)) throw new ValidationError('state must be an object');
-  const clips = value.clips;
-  if (!Array.isArray(clips)) throw new ValidationError('clips must be an array');
+export function normalizeProjectState(state: unknown): ProjectStatePayload {
+  if (!isRecord(state)) {
+    throw new StateValidationFailure('state must be an object');
+  }
+  if (!Array.isArray(state.clips)) {
+    throw new StateValidationFailure('clips must be an array');
+  }
+  if (typeof state.captionsEnabled !== 'boolean') {
+    throw new StateValidationFailure('captionsEnabled must be a boolean');
+  }
   return {
-    clips: clips.map((clip, i) => parseClip(clip, `clips[${i}]`)),
-    voiceover: parseVoiceover(value.voiceover),
-    captionStyle: parseCaptionStyle(value.captionStyle),
-    captionsEnabled: requireBoolean(value.captionsEnabled, 'captionsEnabled'),
+    clips: state.clips.map((clip, index) => normalizeClip(clip, index)),
+    voiceover: normalizeVoiceover(state.voiceover),
+    captionStyle: normalizeCaptionStyle(state.captionStyle),
+    captionsEnabled: state.captionsEnabled,
   };
 }
 
-/** Validate a create/update argument object: project name plus a full ProjectState. */
-export function parseProjectPayload(body: unknown): ProjectPayload {
-  if (!isRecord(body)) throw new ValidationError('request body must be a JSON object');
-  return {
-    name: requireString(body.name, 'name'),
-    state: parseProjectState(body.state),
-  };
-}
-
-/** Validate a tool-supplied project id (delete, update target). */
-export function parseProjectId(value: unknown): string {
-  return requireString(value, 'id');
+/** Validate a project name or id: a non-empty, non-whitespace string. */
+export function normalizeProjectName(value: unknown, label = 'name'): string {
+  if (!isNonEmptyString(value)) {
+    throw new StateValidationFailure(`${label} must be a non-empty string`);
+  }
+  return value;
 }

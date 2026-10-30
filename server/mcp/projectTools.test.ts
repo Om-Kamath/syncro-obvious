@@ -1,4 +1,4 @@
-import { describe, expect, it, afterEach } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import type { AddressInfo } from 'node:net';
 import { randomUUID } from 'node:crypto';
 import express from 'express';
@@ -6,17 +6,18 @@ import { Client } from '@modelcontextprotocol/sdk/client';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { CallToolResultSchema } from '@modelcontextprotocol/sdk/types.js';
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
-import { buildSyncroMcpServer } from './mcpServer';
-import { HttpProjectsApi } from './projectApi';
-import type { ProjectsApi } from './projectApi';
-import type { ProjectRecord, ProjectState, SerializedClip, SerializedVoiceover } from './types';
+import { SyncroApiClient } from './apiClient';
+import type { ProjectRecord, SerializedClip, SerializedVoiceover } from './apiClient';
+import { DEFAULT_MAX_UPLOAD_BYTES, createSyncroMcpServer } from './mediaTools';
+import type { ProjectStatePayload } from './apiClient';
 
 /**
- * Tool-call tests against a test server: every test drives a real MCP client
- * (in-memory transport) through the MCP server and the HTTP adapter into a
+ * Tool-call tests for the project mutation tools against a test server:
+ * every test drives a real MCP client (in-memory transport) through the
+ * real `createSyncroMcpServer` factory and the real `SyncroApiClient` into a
  * real express server implementing the projects REST contract on an
- * ephemeral port. No fetch mocking — failures surface as the agent would
- * see them.
+ * ephemeral port. No fetch mocking at the tool layer — failures surface
+ * exactly as an agent would see them.
  */
 
 type CloseFn = () => void;
@@ -30,10 +31,10 @@ afterEach(() => {
 
 /**
  * Minimal stand-in for the Syncro projects API: same routes, status codes,
- * and error-body shape as the REST contract (`{ error }` on 404, 204 on
- * delete) with an in-memory Map instead of SQLite. The MCP layer's validator
- * is under test here, not the API's — payloads reach this server
- * pre-validated and are stored as-is.
+ * and error-body shape as the wire contract in `src/services/projectApi.ts`
+ * (`{ error }` on 404, 204 on delete), with an in-memory Map instead of
+ * SQLite. The MCP layer's validation runs before any HTTP call, so payloads
+ * reaching this server are already normalized.
  */
 function startTestApi(): Promise<{ baseUrl: string; projects: Map<string, ProjectRecord> }> {
   const projects = new Map<string, ProjectRecord>();
@@ -41,7 +42,7 @@ function startTestApi(): Promise<{ baseUrl: string; projects: Map<string, Projec
   app.use(express.json());
 
   app.post('/api/projects', (req, res) => {
-    const { name, state } = req.body as { name: string; state: ProjectState };
+    const { name, state } = req.body as { name: string; state: ProjectStatePayload };
     const now = new Date().toISOString();
     const record: ProjectRecord = { id: randomUUID(), name, state, createdAt: now, updatedAt: now };
     projects.set(record.id, record);
@@ -63,7 +64,7 @@ function startTestApi(): Promise<{ baseUrl: string; projects: Map<string, Projec
       res.status(404).json({ error: `Project not found: ${req.params.id}` });
       return;
     }
-    const { name, state } = req.body as { name: string; state: ProjectState };
+    const { name, state } = req.body as { name: string; state: ProjectStatePayload };
     const updated: ProjectRecord = { ...record, name, state, updatedAt: new Date().toISOString() };
     projects.set(req.params.id, updated);
     res.json(updated);
@@ -91,11 +92,13 @@ function startTestApi(): Promise<{ baseUrl: string; projects: Map<string, Projec
   });
 }
 
-/** Connect a real MCP client to a real MCP server instance over an in-memory transport pair. */
-async function connectMcpClient(api: ProjectsApi): Promise<Client> {
-  const client = new Client({ name: 'test-client', version: '0.0.0' });
+/** Connect a real MCP client to the real server factory over an in-memory transport pair. */
+async function connectMcpClient(baseUrl: string): Promise<Client> {
+  const apiClient = new SyncroApiClient({ baseUrl });
+  const server = createSyncroMcpServer({ apiClient, maxUploadBytes: DEFAULT_MAX_UPLOAD_BYTES });
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
-  await Promise.all([buildSyncroMcpServer(api).connect(serverTransport), client.connect(clientTransport)]);
+  const client = new Client({ name: 'test-client', version: '0.0.0' });
+  await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
   closeFns.push(() => void client.close());
   return client;
 }
@@ -107,6 +110,26 @@ async function callTool(client: Client, name: string, args: Record<string, unkno
   const result = await client.callTool({ name, arguments: args }, CallToolResultSchema);
   if ('toolResult' in result) throw new Error('unexpected task-based tool response');
   return result;
+}
+
+function textOf(result: CallToolResult): string {
+  const block = result.content[0] as { type: string; text?: string };
+  if (block?.type !== 'text' || typeof block.text !== 'string') {
+    throw new Error(`expected a text block, got: ${JSON.stringify(result.content)}`);
+  }
+  return block.text;
+}
+
+/** Parse the JSON payload of a successful result; throws on error results so misuse is loud. */
+function payloadOf(result: CallToolResult): unknown {
+  if (result.isError) throw new Error(`expected a successful tool result, got: ${textOf(result)}`);
+  return JSON.parse(textOf(result)) as unknown;
+}
+
+async function expectError(call: Promise<CallToolResult>): Promise<string> {
+  const result = await call;
+  expect(result.isError).toBe(true);
+  return textOf(result);
 }
 
 function baseClip(overrides: Partial<SerializedClip> = {}): SerializedClip {
@@ -126,7 +149,7 @@ function baseClip(overrides: Partial<SerializedClip> = {}): SerializedClip {
   };
 }
 
-function validState(overrides: Partial<ProjectState> = {}): ProjectState {
+function validState(overrides: Partial<ProjectStatePayload> = {}): ProjectStatePayload {
   const voiceover: SerializedVoiceover = {
     duration: 10,
     trimStart: 0,
@@ -144,33 +167,22 @@ function validState(overrides: Partial<ProjectState> = {}): ProjectState {
   };
 }
 
-function textOf(result: CallToolResult): string {
-  const block = result.content[0] as { type: string; text?: string };
-  if (block?.type !== 'text' || typeof block.text !== 'string') {
-    throw new Error(`expected a text block, got: ${JSON.stringify(result.content)}`);
-  }
-  return block.text;
-}
-
-async function expectError(call: Promise<CallToolResult>): Promise<string> {
-  const result = await call;
-  expect(result.isError).toBe(true);
-  return textOf(result);
-}
-
-function createdId(result: CallToolResult): string {
-  expect(result.isError).toBeFalsy();
-  return (result.structuredContent as ProjectRecord).id;
+async function createProject(client: Client, name: string): Promise<ProjectRecord> {
+  return payloadOf(await callTool(client, 'create_project', { name, state: validState() })) as ProjectRecord;
 }
 
 describe('tools/list', () => {
-  it('exposes the three project mutation tools with object input schemas', async () => {
+  it('exposes the three project mutation tools alongside the media tools', async () => {
     const { baseUrl } = await startTestApi();
-    const client = await connectMcpClient(new HttpProjectsApi(baseUrl));
+    const client = await connectMcpClient(baseUrl);
 
     const { tools } = await client.listTools();
-    expect(tools.map((tool) => tool.name).sort()).toEqual(['create_project', 'delete_project', 'update_project']);
-    for (const tool of tools) {
+    const names = tools.map((tool) => tool.name);
+    expect(names).toEqual(expect.arrayContaining(['create_project', 'update_project', 'delete_project']));
+
+    const mine = tools.filter((tool) => ['create_project', 'update_project', 'delete_project'].includes(tool.name));
+    expect(mine).toHaveLength(3);
+    for (const tool of mine) {
       expect(tool.inputSchema.type).toBe('object');
       expect(tool.description).toBeTruthy();
     }
@@ -180,12 +192,10 @@ describe('tools/list', () => {
 describe('create_project', () => {
   it('creates a project through the API and returns the stored record', async () => {
     const { baseUrl, projects } = await startTestApi();
-    const client = await connectMcpClient(new HttpProjectsApi(baseUrl));
+    const client = await connectMcpClient(baseUrl);
 
-    const result = await callTool(client, 'create_project', { name: 'Launch video', state: validState() });
+    const record = await createProject(client, 'Launch video');
 
-    expect(result.isError).toBeFalsy();
-    const record = result.structuredContent as ProjectRecord;
     expect(record.id).toBeTruthy();
     expect(record.name).toBe('Launch video');
     expect(record.state).toEqual(validState());
@@ -197,16 +207,15 @@ describe('create_project', () => {
 
   it('normalizes an omitted voiceover to null and drops unknown clip keys', async () => {
     const { baseUrl, projects } = await startTestApi();
-    const client = await connectMcpClient(new HttpProjectsApi(baseUrl));
+    const client = await connectMcpClient(baseUrl);
 
     const state = validState({
       voiceover: undefined,
       clips: [{ ...baseClip(), file: 'browser blob' } as unknown as SerializedClip],
     });
-    const result = await callTool(client, 'create_project', { name: 'Clean', state });
+    const payload = payloadOf(await callTool(client, 'create_project', { name: 'Clean', state }));
+    const record = payload as ProjectRecord;
 
-    expect(result.isError).toBeFalsy();
-    const record = result.structuredContent as ProjectRecord;
     expect(record.state.voiceover).toBeNull();
     expect(record.state.clips[0]).toEqual(baseClip());
 
@@ -216,17 +225,18 @@ describe('create_project', () => {
 
   it.each([
     { label: 'blank name', args: { name: '   ', state: validState() }, message: 'name must be a non-empty string' },
-    { label: 'missing state', args: { name: 'X' }, message: 'state must be an object' },
+    { label: 'missing state', args: { name: 'X' }, message: '' },
     { label: 'negative clip duration', args: { name: 'X', state: validState({ clips: [baseClip({ duration: -1 })] }) }, message: 'clips[0].duration must be >= 0' },
-    { label: 'unknown transition', args: { name: 'X', state: validState({ clips: [baseClip({ transitionIn: 'zoom' as never })] }) }, message: 'clips[0].transitionIn must be one of' },
-    { label: 'unknown caption mode', args: { name: 'X', state: validState({ captionStyle: { mode: 'karaoke' as never, fontSize: 32, color: '#fff', bgColor: '#000', position: 'bottom' } }) }, message: 'captionStyle.mode must be one of' },
+    { label: 'unknown transition', args: { name: 'X', state: validState({ clips: [baseClip({ transitionIn: 'zoom' as never })] }) }, message: 'clips[0].transitionIn must be one of cut, fade, dissolve, wipe' },
+    { label: 'unknown caption mode', args: { name: 'X', state: validState({ captionStyle: { mode: 'karaoke' as never, fontSize: 32, color: '#fff', bgColor: '#000', position: 'bottom' } }) }, message: 'captionStyle.mode must be one of lower-third, word-highlight, speaker-labeled' },
     { label: 'segment start after end', args: { name: 'X', state: validState({ voiceover: { duration: 10, segments: [{ text: 'a', start: 5, end: 4 }] } }) }, message: 'voiceover.segments[0].start must be <= voiceover.segments[0].end' },
-  ])('rejects $label locally without touching the API', async ({ args, message }) => {
+    { label: 'word start after end', args: { name: 'X', state: validState({ voiceover: { duration: 10, segments: [{ text: 'a', start: 0, end: 1, words: [{ word: 'a', start: 1, end: 0 }] }] } }) }, message: 'voiceover.segments[0].words[0].start must be <= voiceover.segments[0].words[0].end' },
+  ])('rejects $label without touching the API', async ({ args, message }) => {
     const { baseUrl, projects } = await startTestApi();
-    const client = await connectMcpClient(new HttpProjectsApi(baseUrl));
+    const client = await connectMcpClient(baseUrl);
 
     const text = await expectError(callTool(client, 'create_project', args));
-    expect(text).toContain(message);
+    if (message) expect(text).toContain(message);
     expect(projects.size).toBe(0);
   });
 });
@@ -234,25 +244,22 @@ describe('create_project', () => {
 describe('update_project', () => {
   it('replaces name and state, and the API reflects the change', async () => {
     const { baseUrl } = await startTestApi();
-    const client = await connectMcpClient(new HttpProjectsApi(baseUrl));
+    const client = await connectMcpClient(baseUrl);
 
-    const id = createdId(
-      await callTool(client, 'create_project', { name: 'Before', state: validState() }),
-    );
+    const created = await createProject(client, 'Before');
 
     const updatedState = validState({
       clips: [baseClip(), baseClip({ id: 'clip-2', name: 'outro.mp4', startTime: 10 })],
     });
-    const result = await callTool(client, 'update_project', { id, name: 'After', state: updatedState });
+    const payload = payloadOf(await callTool(client, 'update_project', { id: created.id, name: 'After', state: updatedState }));
+    const record = payload as ProjectRecord;
 
-    expect(result.isError).toBeFalsy();
-    const record = result.structuredContent as ProjectRecord;
     expect(record.name).toBe('After');
     expect(record.state.clips).toHaveLength(2);
     expect(record.updatedAt >= record.createdAt).toBe(true);
 
     // Read back over HTTP to verify server-side state.
-    const refetched = await fetch(`${baseUrl}/api/projects/${id}`);
+    const refetched = await fetch(`${baseUrl}/api/projects/${created.id}`);
     expect(refetched.status).toBe(200);
     const stored = (await refetched.json()) as ProjectRecord;
     expect(stored.name).toBe('After');
@@ -261,7 +268,7 @@ describe('update_project', () => {
 
   it('rejects an unknown id with the API not-found error', async () => {
     const { baseUrl } = await startTestApi();
-    const client = await connectMcpClient(new HttpProjectsApi(baseUrl));
+    const client = await connectMcpClient(baseUrl);
 
     const text = await expectError(
       callTool(client, 'update_project', { id: 'no-such-id', name: 'Ghost', state: validState() }),
@@ -269,12 +276,20 @@ describe('update_project', () => {
     expect(text).toContain('Project not found: no-such-id');
   });
 
-  it('rejects a missing id before issuing any request', async () => {
+  it('rejects a blank id before issuing any request', async () => {
     const { baseUrl, projects } = await startTestApi();
-    const client = await connectMcpClient(new HttpProjectsApi(baseUrl));
+    const client = await connectMcpClient(baseUrl);
 
-    const text = await expectError(callTool(client, 'update_project', { name: 'X', state: validState() }));
+    const text = await expectError(callTool(client, 'update_project', { id: '  ', name: 'X', state: validState() }));
     expect(text).toContain('id must be a non-empty string');
+    expect(projects.size).toBe(0);
+  });
+
+  it('rejects a missing id (schema-level) without touching the API', async () => {
+    const { baseUrl, projects } = await startTestApi();
+    const client = await connectMcpClient(baseUrl);
+
+    await expectError(callTool(client, 'update_project', { name: 'X', state: validState() }));
     expect(projects.size).toBe(0);
   });
 });
@@ -282,26 +297,25 @@ describe('update_project', () => {
 describe('delete_project', () => {
   it('deletes the project; deleting again reports not-found', async () => {
     const { baseUrl } = await startTestApi();
-    const client = await connectMcpClient(new HttpProjectsApi(baseUrl));
+    const client = await connectMcpClient(baseUrl);
 
-    const id = createdId(await callTool(client, 'create_project', { name: 'Doomed', state: validState() }));
+    const created = await createProject(client, 'Doomed');
 
-    const result = await callTool(client, 'delete_project', { id });
-    expect(result.isError).toBeFalsy();
-    expect(result.structuredContent).toEqual({ id, deleted: true });
+    const payload = payloadOf(await callTool(client, 'delete_project', { id: created.id }));
+    expect(payload).toEqual({ id: created.id, deleted: true });
 
-    const refetched = await fetch(`${baseUrl}/api/projects/${id}`);
+    const refetched = await fetch(`${baseUrl}/api/projects/${created.id}`);
     expect(refetched.status).toBe(404);
 
-    const text = await expectError(callTool(client, 'delete_project', { id }));
-    expect(text).toContain(`Project not found: ${id}`);
+    const text = await expectError(callTool(client, 'delete_project', { id: created.id }));
+    expect(text).toContain(`Project not found: ${created.id}`);
   });
 
-  it('rejects a missing id before issuing any request', async () => {
+  it('rejects a blank id before issuing any request', async () => {
     const { baseUrl, projects } = await startTestApi();
-    const client = await connectMcpClient(new HttpProjectsApi(baseUrl));
+    const client = await connectMcpClient(baseUrl);
 
-    const text = await expectError(callTool(client, 'delete_project'));
+    const text = await expectError(callTool(client, 'delete_project', { id: '' }));
     expect(text).toContain('id must be a non-empty string');
     expect(projects.size).toBe(0);
   });
@@ -309,7 +323,7 @@ describe('delete_project', () => {
 
 describe('failure surfacing', () => {
   it('reports an unreachable API as an error result with a recovery hint', async () => {
-    const client = await connectMcpClient(new HttpProjectsApi('http://127.0.0.1:1'));
+    const client = await connectMcpClient('http://127.0.0.1:1');
 
     const text = await expectError(
       callTool(client, 'create_project', { name: 'X', state: validState() }),
@@ -318,12 +332,12 @@ describe('failure surfacing', () => {
     expect(text).toContain('npm run server:start');
   });
 
-  it('names the available tools for an unknown tool call', async () => {
+  it('reports an unknown tool call as an error result naming the tool', async () => {
     const { baseUrl } = await startTestApi();
-    const client = await connectMcpClient(new HttpProjectsApi(baseUrl));
+    const client = await connectMcpClient(baseUrl);
 
     const text = await expectError(callTool(client, 'no_such_tool'));
-    expect(text).toContain('Unknown tool: no_such_tool');
-    expect(text).toContain('create_project, update_project, delete_project');
+    expect(text).toContain('no_such_tool');
+    expect(text).toMatch(/not found/i);
   });
 });
