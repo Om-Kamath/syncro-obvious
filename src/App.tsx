@@ -340,14 +340,14 @@ export default function App() {
     const file = files[0];
     const url = URL.createObjectURL(file);
     const duration = await getAudioDuration(url);
-    setVoiceover({ file, url, duration });
+    replaceVoiceover({ file, url, duration });
   };
 
   const handleGenerateFromScript = async (script: string, voice: string) => {
     setIsGeneratingAudio(true);
     try {
       const result = await generateAudioFromScript(script, voice);
-      setVoiceover({ url: result.url, duration: result.duration, transcription: result.transcription });
+      replaceVoiceover({ url: result.url, duration: result.duration, transcription: result.transcription });
     } catch (err) {
       console.error('TTS generation failed:', err);
       alert(`Failed to generate audio: ${err instanceof Error ? err.message : String(err)}`);
@@ -368,7 +368,7 @@ export default function App() {
       const result = await generateNarrationFromVideos(
         updatedClips.map(c => ({ name: c.name, analysis: c.analysis ?? '', duration: c.duration })), voice
       );
-      setVoiceover({ url: result.url, duration: result.duration, transcription: result.transcription });
+      replaceVoiceover({ url: result.url, duration: result.duration, transcription: result.transcription });
     } catch (err) {
       console.error('Narration generation failed:', err);
       alert(`Failed to generate narration: ${err instanceof Error ? err.message : String(err)}`);
@@ -438,6 +438,21 @@ export default function App() {
     const clip = videoClips.find(c => c.id === id);
     if (clip) URL.revokeObjectURL(clip.url);
     setVideoClips(videoClips.filter(c => c.id !== id));
+  };
+
+  // Revoke the previous voiceover's blob URL whenever it is replaced or
+  // removed — otherwise each upload or TTS run leaks the old audio blob.
+  // Revocation lives inside the state updater so it runs against the
+  // *current* voiceover even when a long Gemini call was in flight;
+  // revokeObjectURL is idempotent, so StrictMode's double-invoked updaters
+  // stay safe.
+  const replaceVoiceover = (next: Voiceover | null) => {
+    setVoiceover(prev => {
+      if (prev && prev.url !== next?.url && prev.url.startsWith('blob:')) {
+        URL.revokeObjectURL(prev.url);
+      }
+      return next;
+    });
   };
 
   // Swap a clip with one of its alternatives on the timeline (preserves chainClips order)
@@ -532,7 +547,7 @@ export default function App() {
                 <Music className="w-3.5 h-3.5" /> Voiceover
               </h2>
               {voiceover && (
-                <button onClick={() => setVoiceover(null)} className="text-gray-300 hover:text-red-400 transition-colors p-1">
+                <button onClick={() => replaceVoiceover(null)} className="text-gray-300 hover:text-red-400 transition-colors p-1">
                   <Trash2 className="w-3.5 h-3.5" />
                 </button>
               )}
