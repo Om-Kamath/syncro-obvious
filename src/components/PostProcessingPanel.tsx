@@ -918,7 +918,7 @@ function ThumbnailGrid({ items }: { items: ThumbnailCandidate[] }) {
 // ═══════════════════════════════════════════════════════════════════════════
 // TAB 4 — Export
 // ═══════════════════════════════════════════════════════════════════════════
-function ExportTab({
+export function ExportTab({
   voiceover,
   videoClips,
   captionStyle,
@@ -1390,16 +1390,20 @@ function ExportTab({
 
 
             <div className="flex gap-3">
-              {!isExporting ? (
-                <button
-                  onClick={handleExportVideo}
-                  disabled={isGifExporting}
-                  className="flex items-center gap-2 px-4 py-2.5 text-sm font-semibold bg-violet-600 text-white rounded-xl hover:bg-violet-500 transition-all disabled:opacity-50"
-                >
+              <button
+                onClick={handleExportVideo}
+                disabled={isExporting || isGifExporting}
+                aria-busy={isExporting}
+                className="flex items-center gap-2 px-4 py-2.5 text-sm font-semibold bg-violet-600 text-white rounded-xl hover:bg-violet-500 transition-all disabled:opacity-60 disabled:cursor-wait"
+              >
+                {isExporting ? (
+                  <Loader2 className="w-4 h-4 animate-spin flex-shrink-0" />
+                ) : (
                   <Film className="w-4 h-4" />
-                  Start Export
-                </button>
-              ) : (
+                )}
+                {isExporting ? 'Exporting…' : 'Start Export'}
+              </button>
+              {isExporting && (
                 <button
                   onClick={() => stopRef.current?.()}
                   className="flex items-center gap-2 px-4 py-2.5 text-sm font-semibold bg-red-900/30 text-red-400 rounded-xl hover:bg-red-900/50 transition-all"
