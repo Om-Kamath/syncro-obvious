@@ -41,7 +41,7 @@ The SQLite database defaults to `syncro.db` (override with `SYNCRO_DB_PATH`); un
 
 **Publishing** — generated descriptions with chapters and hashtags, YouTube-format chapters as a separate download, key-moment thumbnail captures with quote overlays, and aspect presets (9:16 / 16:9 / 1:1) with letterbox or smart-crop handling in exports.
 
-**Export** — canvas + `MediaRecorder` pipeline with quality presets (with estimated output size), background music with volume control, and WebM/MP4 with codec fallback.
+**Export** — canvas + `MediaRecorder` pipeline with quality presets (with estimated output size), background music with volume control, animated GIF export (fps/width options, cancellable), and WebM/MP4 with codec fallback.
 
 **Projects** — save and reload the full editor state (clips, voiceover, caption style, ordering) through the local server, with a per-clip error banner when media can't be restored.
 
@@ -97,13 +97,14 @@ Saved projects serialize everything in the editor: clip metadata (order, tracks,
 
 ### MCP server
 
-A Model Context Protocol server (`server/mcp/`) lets an agent manage Syncro's saved projects and move media without the UI. Seven tools are live today:
+A Model Context Protocol server (`server/mcp/`) lets an agent manage Syncro's saved projects and move media without the UI. Ten tools are live today:
 
 - **Projects** — `list_projects`, `get_project`, `create_project`, `update_project`, and `delete_project` cover the full project lifecycle against the running server.
 - **Media** — `upload_media` puts a file on the server; `attach_media` adds it to a project's timeline.
-- **Planned** — server-side Gemini generation and export-trigger tools are documented in [MCP.md](MCP.md) ahead of their branches landing.
+- **Generation** — `generate_narration`, `generate_tts`, and `generate_captions` call Gemini from the MCP process and need `GEMINI_API_KEY` in its environment; the description and thumbnail generators are planned.
+- **Planned** — export-trigger tools and the `get_timeline` reader are documented in [MCP.md](MCP.md) ahead of their branches landing.
 
-The server is a thin REST client of the projects API — it holds no database of its own — and points at a running Syncro server via `SYNCRO_SERVER_URL` (default `http://localhost:3001`). Expected failures (unknown project id, API unreachable) surface as tool errors the calling agent can react to; they never crash the session. One transport today: **stdio**, launched as `npm run mcp:start`; streamable HTTP is planned.
+The server is a thin REST client of the projects API — it holds no database of its own — and points at a running Syncro server via `SYNCRO_SERVER_URL` (default `http://localhost:3001`). Expected failures (unknown project id, API unreachable) surface as tool errors the calling agent can react to; they never crash the session. One transport today: **stdio**, launched as `npm run mcp:start` (alias `npm run mcp`); streamable HTTP is planned. Generation tools additionally read `GEMINI_API_KEY` from the MCP process and fail as tool errors when it is unset.
 
 Full tool reference, launch instructions, and copy-paste Claude Desktop / generic agent configs (in [`docs/examples/`](docs/examples/)): **[MCP.md](MCP.md)**.
 

@@ -22,7 +22,7 @@ This guide covers what the MCP surface is today, how to launch it in each transp
    ```
 
    The database file defaults to `syncro.db` in the repo root; set `SYNCRO_DB_PATH` to change it. Create a project from the UI ("Save" in the editor) or `POST /api/projects` — the MCP tools can only see what the REST API returns.
-3. No Gemini key is needed for the read and media tools — only Syncro's server itself needs one, and only for AI features. The server-side generation tools (`generate_narration`, `generate_tts`, `generate_captions`, `generate_description`, `generate_thumbnails`) are planned and documented here ahead of their branch landing; once shipped they call Gemini from the MCP server process and need `GEMINI_API_KEY` in that process's environment (see [Tool reference](#tool-reference)).
+3. No Gemini key is needed for the read, mutation, and media tools. The server-side generation tools call Gemini from the MCP server process: `generate_narration`, `generate_tts`, and `generate_captions` are shipped and need `GEMINI_API_KEY` in the MCP server's environment — without it the server starts but the generation tools fail fast with a clear error; the description and thumbnail generators arrive on their branch (see [Tool reference](#tool-reference)).
 
 ## Launching the server
 
@@ -30,7 +30,7 @@ The MCP server has two transports. Pick one:
 
 | Transport | Command | Who connects | Notes |
 | --- | --- | --- | --- |
-| **stdio** (the only transport on `main` today) | `npm run mcp:start` | One client per process; the client spawns it | What Claude Desktop and most agent configs use. Protocol on stdout, diagnostics on stderr. |
+| **stdio** (the only transport on `main` today) | `npm run mcp:start` (alias `npm run mcp`) | One client per process; the client spawns it | What Claude Desktop and most agent configs use. Protocol on stdout, diagnostics on stderr. |
 | **streamable HTTP** | `npm run mcp:http` | Any number of clients against a shared server | **Planned — not on `main` yet** (branch `task/pr-66-mcp-streamable-http`). Will serve `POST/GET/DELETE /mcp` on `127.0.0.1:3010` (stateful sessions, DNS-rebinding protection, loopback bind). |
 
 Handy invocations:
@@ -52,9 +52,9 @@ SYNCRO_MCP_PORT=4000 npm run mcp:http        # same, via env (planned — not on
 
 ## Tool reference
 
-Seven tools are live on `main` today — `list_projects`, `get_project`, `create_project`, `update_project`, `delete_project`, `upload_media`, and `attach_media` — and eight more are documented below from their open branches so this guide stays stable as they land. Every tool returns JSON, pretty-printed, as a single text content block. Expected failures — unknown project id, API unreachable, missing key — come back as tool errors (`isError: true`) with a human-readable message, so an agent can react to them; they never crash the session.
+Ten tools are live on `main` today — `list_projects`, `get_project`, `create_project`, `update_project`, `delete_project`, `upload_media`, `attach_media`, `generate_narration`, `generate_tts`, and `generate_captions` — and five more are documented below from their open branches so this guide stays stable as they land. Every tool returns JSON, pretty-printed, as a single text content block. Expected failures — unknown project id, API unreachable, missing key — come back as tool errors (`isError: true`) with a human-readable message, so an agent can react to them; they never crash the session.
 
-Read tools (`list_projects`, `get_project`), the project mutation tools (`create_project`, `update_project`, `delete_project`), and the media tools (`upload_media`, `attach_media`) are shipped. Generation, export, and the read tool `get_timeline` arrive on their own branches (each listed with its branch name and marked "not on `main` yet"). They all register into the same server entrypoint, so the launch contract in the previous section holds regardless of which tool groups have landed.
+Read tools (`list_projects`, `get_project`), the project mutation tools (`create_project`, `update_project`, `delete_project`), the media tools (`upload_media`, `attach_media`), and the generation tools (`generate_narration`, `generate_tts`, `generate_captions`) are shipped. The description and thumbnail generators, the export tools, and the read tool `get_timeline` arrive on their own branches (each listed with its branch name and marked "not on `main` yet"). They all register into the same server entrypoint, so the launch contract in the previous section holds regardless of which tool groups have landed.
 
 ### Reading projects — `list_projects` and `get_project` shipped; `get_timeline` not on `main` yet
 
@@ -169,7 +169,7 @@ Attaches an uploaded media asset to a project as a new clip (updates the project
 | `duration` | number | yes | Media duration in seconds — the server cannot probe it from bytes |
 | `name` | string | no | Clip name; defaults to the media filename or id |
 
-### Server-side generation (`task/pr-33-mcp-generation-tools`) — not on `main` yet
+### Server-side generation — `generate_narration`, `generate_tts`, and `generate_captions` shipped; `generate_description` and `generate_thumbnails` not on `main` yet
 
 These tools call Gemini directly from the MCP server process (not through the UI), so they require **`GEMINI_API_KEY` in the MCP server's environment** — add it to the config's `env` block. Without it the tools fail fast with a clear message.
 
@@ -323,9 +323,9 @@ The configs in this guide were executed, not just written. Every launch form bel
 | `SYNCRO_MCP_PORT=4000 npm run mcp:http` | HTTP transport branch, `6d276f2` | Same handshake on port 4000 |
 | REST backing | projects API, `f99d14a` | Express on `:3001` with a seeded SQLite project; the MCP read tools returned exactly the seeded data |
 
-The generation and publishing tool groups are documented from their branches' code and test suites (`server/mcp/*.test.ts` on each branch) rather than live-driven here — their contracts above come straight from the registered input schemas. Everything else in the table was executed end-to-end.
+The description and thumbnail generators and the publishing tool group are documented from their branches' code and test suites (`server/mcp/*.test.ts` on each branch) rather than live-driven here — their contracts above come straight from the registered input schemas. Everything else in the table was executed end-to-end.
 
-The stdio servers read through `SYNCRO_SERVER_URL` (default `http://localhost:3001`); the HTTP-transport branch runs against an in-memory store until it is rebased onto the DB-backed REST API, which is why its `list_projects` call returned an empty array in the evidence above. If this guide and the code ever disagree, the launch surface is `package.json`'s `mcp*` scripts, tool registrations live in the modules under `server/mcp/` (`tools.ts`, `mcpServer.ts`, `mediaTools.ts`, `server.ts`, …), and env handling sits beside each entrypoint (`api.ts` on the scaffold, `gemini.ts` on the publishing branch) — fix the docs against those, or the code against this guide.
+The stdio servers read through `SYNCRO_SERVER_URL` (default `http://localhost:3001`); the HTTP-transport branch runs against an in-memory store until it is rebased onto the DB-backed REST API, which is why its `list_projects` call returned an empty array in the evidence above. If this guide and the code ever disagree, the launch surface is `package.json`'s `mcp*` scripts, tool registrations live in the modules under `server/mcp/` (`projectTools.ts`, `mediaTools.ts`, `generationTools.ts`, `index.ts`), and env handling sits beside each entrypoint (`index.ts` for `SYNCRO_SERVER_URL`, `geminiClient.ts` for `GEMINI_API_KEY`) — fix the docs against those, or the code against this guide.
 
 ## Troubleshooting
 
