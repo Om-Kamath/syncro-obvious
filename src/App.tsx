@@ -1,8 +1,9 @@
+
 import React, { Suspense, useState, useRef, useEffect, useCallback } from 'react';
 import { VideoClip, Voiceover, CaptionStyle, CaptionSegment, ThumbnailCandidate } from './types';
+import { CaptionOverlay } from './components/CaptionOverlay';
 import { FileUploader } from './components/FileUploader';
 import { MediaDropLayer, type ImportedMedia } from './components/MediaDropLayer';
-import { Toast, type ToastState } from './components/Toast';
 import { Timeline } from './components/Timeline';
 import type { TimelineTransport } from './components/Timeline';
 import { resolveShortcut, getShortcutContext } from './utils/keyboardShortcuts';
@@ -40,7 +41,7 @@ import {
 } from 'lucide-react';
 import { setApiKey, hasApiKey } from './services/apiKey';
 import { chainClips, rippleDeleteMany } from './utils/chainClips';
-import { resolveWordTimings, findActiveWordIndex } from './utils/wordTiming';
+import { DEFAULT_CAPTION_STYLE } from './utils/captionPresets';
 import { captureFilmstrip } from './utils/clipThumbnails';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -70,55 +71,6 @@ function attachFilmstrips(
       })
       .catch(err => console.warn(`Filmstrip capture failed for "${clip.name}"`, err));
   }
-}
-
-function CaptionOverlay({
-  segments,
-  currentTime,
-  style,
-}: {
-  segments: CaptionSegment[];
-  currentTime: number;
-  style: CaptionStyle;
-}) {
-  const seg = segments.find(s => currentTime >= s.start && currentTime <= s.end);
-  if (!seg) return null;
-  const baseContainer = cn(
-    'absolute left-0 right-0 px-6 pointer-events-none z-10 flex justify-center',
-    style.position === 'bottom' ? 'bottom-6' : 'top-6'
-  );
-  if (style.mode === 'word-highlight') {
-    const words = resolveWordTimings(seg);
-    const wordIdx = findActiveWordIndex(words, currentTime);
-    return (
-      <div className={baseContainer}>
-        <div className="px-4 py-2 rounded-xl flex flex-wrap gap-x-1.5 gap-y-1 justify-center max-w-2xl"
-          style={{ backgroundColor: style.bgColor, fontSize: `${style.fontSize}px` }}>
-          {words.map((w, i) => (
-            <span key={i} style={{ color: i === wordIdx ? '#7c3aed' : style.color, fontWeight: i === wordIdx ? 700 : 500, transition: 'color 0.1s' }}>{w.word}</span>
-          ))}
-        </div>
-      </div>
-    );
-  }
-  if (style.mode === 'speaker-labeled') {
-    return (
-      <div className={baseContainer}>
-        <div className="px-4 py-2 rounded-xl max-w-2xl" style={{ backgroundColor: style.bgColor, fontSize: `${style.fontSize}px` }}>
-          <span style={{ color: '#7c3aed', fontWeight: 700, marginRight: '8px' }}>Speaker:</span>
-          <span style={{ color: style.color }}>{seg.text}</span>
-        </div>
-      </div>
-    );
-  }
-  return (
-    <div className={baseContainer}>
-      <div className="px-5 py-2.5 rounded-xl max-w-2xl text-center"
-        style={{ backgroundColor: style.bgColor, color: style.color, fontSize: `${style.fontSize}px`, fontWeight: 600 }}>
-        {seg.text}
-      </div>
-    </div>
-  );
 }
 
 type VoiceoverMethod = 'upload' | 'script' | 'auto';
@@ -301,15 +253,12 @@ export default function App() {
   const [editingClipId, setEditingClipId] = useState<string | null>(null);
   const [showVoiceoverEditor, setShowVoiceoverEditor] = useState(false);
   const [captionsEnabled, setCaptionsEnabled] = useState(false);
-  const [captionStyle, setCaptionStyle] = useState<CaptionStyle>({
-    mode: 'lower-third', fontSize: 16, color: '#ffffff', bgColor: '#000000', position: 'bottom',
-  });
+  const [captionStyle, setCaptionStyle] = useState<CaptionStyle>(DEFAULT_CAPTION_STYLE);
   const [onboardingStep, setOnboardingStep] = useState<1 | 2 | null>(1);
   const [showExportModal, setShowExportModal] = useState(false);
   const [showLogs, setShowLogs] = useState(false);
   const [showApiKeyModal, setShowApiKeyModal] = useState(!hasApiKey());
   const [apiKeyInput, setApiKeyInput] = useState('');
-  const [toast, setToast] = useState<ToastState | null>(null);
   const [importedThumbnails, setImportedThumbnails] = useState<ThumbnailCandidate[]>([]);
   const videoRefs = useRef<Record<string, HTMLVideoElement>>({});
   const transportRef = useRef<TimelineTransport | null>(null);
@@ -410,20 +359,18 @@ export default function App() {
     replaceVoiceover({ file, url, duration });
   };
 
-  const showToast = (kind: ToastState['kind'], message: string) => setToast({ kind, message });
-
   const describeFiles = (files: File[]) => files.map(f => `"${f.name}"`).join(', ');
 
   const handleAppDropImport = ({ videos, audios, images }: ImportedMedia) => {
     if (videos.length > 0) {
       void handleVideoUpload(videos)
-        .then(() => showToast('success', `Imported ${videos.length} video${videos.length > 1 ? 's' : ''}`))
-        .catch(() => showToast('error', 'Failed to import videos'));
+        .then(() => toast.success(`Imported ${videos.length} video${videos.length > 1 ? 's' : ''}`))
+        .catch(() => toast.error('Failed to import videos'));
     }
     if (audios.length > 0) {
       void handleVoiceoverUpload(audios)
-        .then(() => showToast('success', `Voiceover set to "${audios[0].name}"`))
-        .catch(() => showToast('error', 'Failed to import voiceover'));
+        .then(() => toast.success(`Voiceover set to "${audios[0].name}"`))
+        .catch(() => toast.error('Failed to import voiceover'));
     }
     if (images.length > 0) {
       const candidates: ThumbnailCandidate[] = images.map(file => ({
@@ -435,16 +382,16 @@ export default function App() {
         source: 'imported' as const,
       }));
       setImportedThumbnails(prev => [...prev, ...candidates]);
-      showToast('success', `Imported ${images.length} image${images.length > 1 ? 's' : ''} — available in Export → Thumbnails`);
+      toast.success(`Imported ${images.length} image${images.length > 1 ? 's' : ''} — available in Export → Thumbnails`);
     }
   };
 
   const handleAppDropRejected = (files: File[]) => {
-    showToast('error', `Unsupported file type: ${describeFiles(files)}. Drop video, audio, or image files.`);
+    toast.error(`Unsupported file type: ${describeFiles(files)}. Drop video, audio, or image files.`);
   };
 
   const rejectNonVideos = (files: File[]) => {
-    showToast('error', `Unsupported file type: ${describeFiles(files)}. The video uploader accepts video files.`);
+    toast.error(`Unsupported file type: ${describeFiles(files)}. The video uploader accepts video files.`);
   };
 
   const handleGenerateFromScript = async (script: string, voice: string) => {
@@ -987,7 +934,6 @@ export default function App() {
       </AnimatePresence>
 
       <MediaDropLayer onImport={handleAppDropImport} onRejected={handleAppDropRejected} />
-      {toast && <Toast toast={toast} onDismiss={() => setToast(null)} />}
     </div>
   );
 }

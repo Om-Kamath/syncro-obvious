@@ -49,6 +49,8 @@ export interface VideoDescription {
 
 export type CaptionMode = 'lower-third' | 'word-highlight' | 'speaker-labeled';
 
+export type CaptionPresetName = 'minimal' | 'bold-pop' | 'karaoke' | 'classic';
+
 export interface WordTiming {
   word: string;
   start: number; // seconds, absolute on the voiceover timeline
@@ -68,6 +70,7 @@ export interface CaptionStyle {
   color: string;
   bgColor: string;
   position: 'bottom' | 'top';
+  preset?: CaptionPresetName; // named look this style came from; manual edits clear it
 }
 
 export interface CaptionTemplate {
