@@ -78,7 +78,7 @@ export function ProjectsPanel({
                 className="border border-red-200 bg-red-50 rounded-xl p-3"
                 aria-live="polite"
               >
-                <p className="text-xs font-semibold text-red-600">
+                <p className="text-xs font-semibold text-red-600 break-words">
                   Delete &ldquo;{project.name}&rdquo;? This can&rsquo;t be undone.
                 </p>
                 <div className="flex gap-2 mt-2">
@@ -104,7 +104,7 @@ export function ProjectsPanel({
                 className="flex items-center gap-3 border border-gray-100 bg-gray-50 hover:border-gray-200 rounded-xl p-3 transition-all"
               >
                 <div className="flex-1 min-w-0">
-                  <p className="text-xs font-semibold text-gray-700 truncate">{project.name}</p>
+                  <p className="text-xs font-semibold text-gray-700 truncate" title={project.name}>{project.name}</p>
                   <p className="text-[10px] text-gray-400">Updated {formatUpdatedAt(project.updatedAt)}</p>
                 </div>
                 <div className="flex gap-1 shrink-0">
