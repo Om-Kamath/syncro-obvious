@@ -7,6 +7,7 @@ export interface VideoClip {
   file: File;
   url: string;
   duration: number;         // original file duration (never mutated)
+  fps?: number;             // detected source frame rate; undefined → trim grid falls back to DEFAULT_FPS
   trimmedDuration?: number; // effective display/playback duration after right-trim
   trimStart?: number;       // seconds into the original file to start playback (default 0)
   startTime: number;        // start time in the overall timeline

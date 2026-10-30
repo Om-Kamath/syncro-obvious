@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState, useCallback, useReducer } from 'rea
 import WaveSurfer from 'wavesurfer.js';
 import { VideoClip, Voiceover, TransitionType } from '../types';
 import { ClipWaveform } from './ClipWaveform';
+import { applyFrameTrim, clipFps, frameDuration } from '../utils/trimMath';
 import { Play, Pause, Scissors, Wand2, Video, Plus, Minus, Maximize2, Zap, Layers, Star, Trash2, AlertTriangle, Keyboard } from 'lucide-react';
 import { DEFAULT_PPS, fitPixelsPerSecond, stepPixelsPerSecond } from '../utils/timelineZoom';
 import { findClipAtPlayhead, splitClipsAtPlayhead } from '../utils/clipSplit';
@@ -49,6 +50,10 @@ interface ClipDragState {
 }
 
 type TrimSide = 'left' | 'right';
+
+// Map the math module's 'in'/'out' onto the handle sides used in this file.
+const trimSide = (side: TrimSide): 'in' | 'out' => (side === 'left' ? 'in' : 'out');
+
 interface TrimDragState {
   id: string;
   side: TrimSide;
@@ -366,6 +371,16 @@ export const Timeline: React.FC<TimelineProps> = ({
     setDraggingTrimId(clip.id);
   };
 
+  // Frame-accurate trim shared by mouse drag and keyboard. Moving the in-point
+  // compensates startTime so the clip's visible left edge stays where the user
+  // grabbed it (the historical behavior of the drag handle).
+  const trimClip = (clip: VideoClip, side: TrimSide, deltaSec: number): VideoClip => {
+    const next = applyFrameTrim(clip, trimSide(side), deltaSec);
+    if (side !== 'left') return next;
+    const deltaIn = (next.trimStart ?? 0) - (clip.trimStart ?? 0);
+    return { ...next, startTime: Math.max(0, clip.startTime + deltaIn) };
+  };
+
   useEffect(() => {
     if (!draggingTrimId) return;
     const onMove = (e: MouseEvent) => {
@@ -374,16 +389,23 @@ export const Timeline: React.FC<TimelineProps> = ({
       const deltaSec = (e.clientX - drag.startMouseX) / pixelsPerSecond;
       onVideoClipChange(videoClipsRef.current.map((c: VideoClip) => {
         if (c.id !== drag.id) return c;
+        // Main's semantic snapping first (neighbors/playhead in timeline
+        // space), then trimClip applies the delta from the drag-start
+        // snapshot with frame-grid snapping and clamping.
+        const snapshot = {
+          ...c,
+          trimStart: drag.origTrimStart > 0 ? drag.origTrimStart : undefined,
+          trimmedDuration: drag.origTrimmedDuration,
+          startTime: drag.origStartTime,
+        };
         if (drag.side === 'right') {
           const rawEnd = drag.origStartTime + drag.origTrimmedDuration + deltaSec;
           const snappedEnd = findSnap(rawEnd, snapTargets(drag.id), pixelsPerSecond).time;
-          return { ...c, trimmedDuration: Math.max(0.5, Math.min(snappedEnd - drag.origStartTime, drag.origDuration - drag.origTrimStart)) };
-        } else {
-          const rawStart = drag.origStartTime + deltaSec;
-          const snappedStart = findSnap(rawStart, snapTargets(drag.id), pixelsPerSecond).time;
-          const clamped = Math.max(0, Math.min(snappedStart - drag.origStartTime, drag.origTrimmedDuration - 0.5));
-          return { ...c, trimStart: drag.origTrimStart + clamped > 0 ? drag.origTrimStart + clamped : undefined, startTime: Math.max(0, drag.origStartTime + clamped), trimmedDuration: drag.origTrimmedDuration - clamped };
+          return trimClip(snapshot, 'right', snappedEnd - (drag.origStartTime + drag.origTrimmedDuration));
         }
+        const rawStart = drag.origStartTime + deltaSec;
+        const snappedStart = findSnap(rawStart, snapTargets(drag.id), pixelsPerSecond).time;
+        return trimClip(snapshot, 'left', snappedStart - drag.origStartTime);
       }));
     };
     const onUp = () => { trimDragRef.current = null; setDraggingTrimId(null); };
@@ -454,26 +476,18 @@ export const Timeline: React.FC<TimelineProps> = ({
     onDeleteClips(ids);
     dispatchSelection({ type: 'clear' });
   };
-  // Keyboard mirror of the mouse trim drag — same clamps, fixed step.
+  // Keyboard mirror of the mouse trim drag — same frame-snapped math, one
+  // frame per press (shift = one second worth of frames).
   const handleTrimKeyDown = (e: React.KeyboardEvent, clip: VideoClip, side: TrimSide) => {
-    const step = e.shiftKey ? 1 : 0.1;
+    const step = e.shiftKey ? 1 : frameDuration(clip.fps);
     let delta = 0;
     if (e.key === 'ArrowLeft') delta = -step;
     else if (e.key === 'ArrowRight') delta = step;
     else return;
     e.preventDefault(); e.stopPropagation();
-    const trimStart = clip.trimStart ?? 0;
-    const trimmedDuration = clip.trimmedDuration ?? (clip.duration - trimStart);
-    onVideoClipChange(videoClipsRef.current.map((c: VideoClip) => {
-      if (c.id !== clip.id) return c;
-      if (side === 'right') {
-        const next = Math.max(0.5, Math.min(trimmedDuration + delta, c.duration - trimStart));
-        return { ...c, trimmedDuration: next };
-      }
-      const clamped = Math.max(0, Math.min(delta, trimmedDuration - 0.5));
-      const newTrimStart = trimStart + clamped;
-      return { ...c, trimStart: newTrimStart > 0 ? newTrimStart : undefined, startTime: Math.max(0, c.startTime + clamped), trimmedDuration: trimmedDuration - clamped };
-    }));
+    onVideoClipChange(videoClipsRef.current.map((c: VideoClip) =>
+      c.id !== clip.id ? c : trimClip(c, side, delta)
+    ));
   };
   const handleVoiceoverMouseDown = (e: React.MouseEvent) => {
     e.stopPropagation(); e.preventDefault();
@@ -696,7 +710,9 @@ export const Timeline: React.FC<TimelineProps> = ({
 
                       {trackClips.map((clip) => {
                         const effectiveDuration = clip.trimmedDuration ?? clip.duration;
+                        const fps = clipFps(clip);
                         const isActive = currentTime >= clip.startTime && currentTime < clip.startTime + effectiveDuration;
+                        const frameCount = Math.round(effectiveDuration * fps);
                         const isDragging = draggingClipId === clip.id;
                         const isTrimDragging = draggingTrimId === clip.id;
                         const hasFilmstrip = (clip.thumbnails?.length ?? 0) > 0;
@@ -760,7 +776,7 @@ export const Timeline: React.FC<TimelineProps> = ({
                                 data-trim-handle="left"
                                 role="slider"
                                 tabIndex={0}
-                                aria-label={`Trim clip start: ${(clip.trimStart ?? 0).toFixed(1)} seconds in`}
+                                aria-label={`Trim clip start: ${(clip.trimStart ?? 0).toFixed(2)} seconds in, frame ${Math.round((clip.trimStart ?? 0) * fps)}`}
                                 aria-valuemin={0}
                                 aria-valuemax={Math.round(clip.duration * 10) / 10}
                                 aria-valuenow={Math.round((clip.trimStart ?? 0) * 10) / 10}
@@ -778,7 +794,8 @@ export const Timeline: React.FC<TimelineProps> = ({
                               {(clip.trimmedDuration !== undefined || clip.trimStart !== undefined) && (
                                 <div className="relative z-10 flex items-center gap-1 mt-0.5">
                                   <Scissors className="w-3 h-3 text-orange-400 shrink-0" />
-                                  <span className="text-[10px] text-orange-400 font-medium">{effectiveDuration.toFixed(1)}s</span>
+                                  <span className="text-[10px] text-orange-400 font-medium">{effectiveDuration.toFixed(2)}s</span>
+                                  <span className="text-[10px] text-orange-300/80 font-mono" title={`${Math.round((clip.trimStart ?? 0) * fps)}–${Math.round(((clip.trimStart ?? 0) + effectiveDuration) * fps)} @ ${fps}fps`}>{frameCount}f</span>
                                 </div>
                               )}
                               {clip.mediaMissing && (
@@ -796,7 +813,7 @@ export const Timeline: React.FC<TimelineProps> = ({
                                 data-trim-handle="right"
                                 role="slider"
                                 tabIndex={0}
-                                aria-label={`Trim clip end: ${effectiveDuration.toFixed(1)} seconds long`}
+                                aria-label={`Trim clip end: ${effectiveDuration.toFixed(2)} seconds long, out frame ${Math.round(((clip.trimStart ?? 0) + effectiveDuration) * fps)}`}
                                 aria-valuemin={0.5}
                                 aria-valuemax={Math.round((clip.duration - (clip.trimStart ?? 0)) * 10) / 10}
                                 aria-valuenow={Math.round(effectiveDuration * 10) / 10}

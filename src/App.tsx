@@ -2,6 +2,7 @@
 import React, { Suspense, useState, useRef, useEffect, useCallback } from 'react';
 import { VideoClip, Voiceover, CaptionStyle, CaptionSegment, ThumbnailCandidate } from './types';
 import { CaptionOverlay } from './components/CaptionOverlay';
+import { probeVideo } from './utils/videoProbe';
 import { FileUploader } from './components/FileUploader';
 import { MediaDropLayer, type ImportedMedia } from './components/MediaDropLayer';
 import { Timeline } from './components/Timeline';
@@ -355,17 +356,14 @@ export default function App() {
     if (lastVideo) lastVideo.currentTime = last.duration;
   }, [currentTime, videoClips]);
 
-  const getVideoDuration = (url: string): Promise<number> =>
-    new Promise(resolve => { const v = document.createElement('video'); v.src = url; v.onloadedmetadata = () => resolve(v.duration); v.onerror = () => resolve(0); });
-
   const getAudioDuration = (url: string): Promise<number> =>
     new Promise(resolve => { const a = new Audio(url); a.onloadedmetadata = () => resolve(a.duration); a.onerror = () => resolve(0); });
 
   const handleVideoUpload = async (files: File[]) => {
     const newClips: VideoClip[] = await Promise.all(files.map(async (file) => {
       const url = URL.createObjectURL(file);
-      const duration = await getVideoDuration(url);
-      return { id: Math.random().toString(36).substr(2, 9), file, url, duration, startTime: 0, name: file.name };
+      const { duration, fps } = await probeVideo(url);
+      return { id: Math.random().toString(36).substr(2, 9), file, url, duration, fps, startTime: 0, name: file.name };
     }));
     setVideoClips(prev => [...prev, ...newClips]);
     attachFilmstrips(newClips, setVideoClips);
