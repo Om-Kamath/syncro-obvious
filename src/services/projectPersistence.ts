@@ -426,6 +426,28 @@ export function deleteProject(projectId: string, storage: ProjectStorage = creat
   storage.deleteRecord(projectId);
 }
 
+// Bumps savedAt so the renamed record re-sorts to the top of the open dialog,
+// matching how a fresh save behaves.
+export function renameProject(
+  projectId: string,
+  name: string,
+  storage: ProjectStorage = createLocalStorageProjectStorage(),
+): SavedProjectSummary {
+  const record = storage.getRecord(projectId);
+  if (!record) {
+    throw new ProjectNotFoundError(`No saved project with id "${projectId}".`);
+  }
+  const renamed: SavedProjectRecord = { ...record, name, savedAt: new Date().toISOString() };
+  storage.saveRecord(renamed);
+  return {
+    id: renamed.id,
+    name: renamed.name,
+    savedAt: renamed.savedAt,
+    clipCount: renamed.project.clips.length,
+    hasVoiceover: renamed.project.voiceover !== null,
+  };
+}
+
 // Convenience for callers listing saved projects (the open dialog data source).
 export function listSavedProjects(storage: ProjectStorage = createLocalStorageProjectStorage()): SavedProjectSummary[] {
   return storage.listRecords().map(record => ({

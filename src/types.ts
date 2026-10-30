@@ -119,3 +119,4 @@ export interface SavedProject extends SavedProjectSummary {
   createdAt: string; // ISO timestamp
   snapshot: ProjectSnapshot;
 }
+
