@@ -7,6 +7,21 @@ function getAI() {
   return new GoogleGenAI({ apiKey });
 }
 
+/**
+ * Parses the model's JSON response, raising on empty or malformed output
+ * instead of silently degrading to empty results (which read as "no data").
+ */
+export function parseModelJson<T>(text: string | undefined, context: string): T {
+  if (!text || !text.trim()) {
+    throw new Error(`${context}: Gemini returned an empty response.`);
+  }
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    throw new Error(`${context}: Gemini returned malformed JSON — got: ${text.slice(0, 200)}`);
+  }
+}
+
 export async function generateDescription(
   transcription: string,
   segments: Array<{ text: string; start: number; end: number }>,
@@ -56,11 +71,10 @@ Generate:
     },
   });
 
-  try {
-    return JSON.parse(response.text || '{"summary":"","chapters":[],"hashtags":[]}');
-  } catch {
-    return { summary: '', chapters: [], hashtags: [] };
-  }
+  return parseModelJson<{ summary: string; chapters: Array<{ time: number; label: string }>; hashtags: string[] }>(
+    response.text,
+    "Description generation"
+  );
 }
 
 export async function identifyKeyMoments(
@@ -101,9 +115,8 @@ For each moment provide:
     },
   });
 
-  try {
-    return JSON.parse(response.text || "[]");
-  } catch {
-    return [];
-  }
+  return parseModelJson<Array<{ timestamp: number; quote: string; reason: string }>>(
+    response.text,
+    "Thumbnail key-moment identification"
+  );
 }
