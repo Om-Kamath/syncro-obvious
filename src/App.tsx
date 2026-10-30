@@ -47,12 +47,13 @@ import { DEFAULT_CAPTION_STYLE } from './utils/captionPresets';
 import { captureFilmstrip } from './utils/clipThumbnails';
 import { estimateNarrationFlowCost, estimateTtsCost } from './services/costEstimate';
 import { CostEstimateBadge } from './components/CostEstimateBadge';
+import { ProjectsModal } from './components/ProjectsModal';
 import { motion, AnimatePresence } from 'motion/react';
-import { ProjectSaveModal } from './components/ProjectSaveModal';
 import { RestoreErrorBanner } from './components/RestoreErrorBanner';
 import {
   deleteProject,
   listSavedProjects,
+  renameProject,
   restoreProject,
   saveProject,
   type ClipRestoreError,
@@ -642,6 +643,15 @@ export default function App() {
     if (activeProjectId === id) setActiveProjectId(null);
   };
 
+  const handleRenameProject = (id: string, name: string) => {
+    try {
+      renameProject(id, name);
+      refreshSavedProjects();
+    } catch (err) {
+      setProjectListError(err instanceof Error ? err.message : 'Could not rename the project.');
+    }
+  };
+
   const handleDismissRestoreErrors = () => {
     setRestoreErrors([]);
     setRestoreVoiceoverError(null);
@@ -688,6 +698,13 @@ export default function App() {
             )}
           >
             <Activity className="w-3 h-3" /> Logs
+          </button>
+          <button
+            onClick={handleOpenProjectModal}
+            title="Save or load projects"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium bg-gray-100 text-gray-500 hover:bg-gray-200 transition-colors"
+          >
+            <FolderOpen className="w-3 h-3" /> Projects
           </button>
           <button
             onClick={() => { setApiKeyInput(''); setShowApiKeyModal(true); }}
@@ -993,17 +1010,20 @@ export default function App() {
       </AnimatePresence>
 
       {showProjectModal && (
-        <ProjectSaveModal
+        <ProjectsModal
           projects={savedProjects}
-          isSaving={isSavingProject}
-          isRestoring={isRestoringProject}
-          saveError={saveError}
-          loadError={projectListError}
+          loading={isRestoringProject}
+          error={projectListError ?? saveError}
+          saving={isSavingProject}
+          canSave={videoClips.length > 0 || voiceover !== null}
+          currentProjectId={activeProjectId}
+          onClose={() => { setShowProjectModal(false); setSaveError(null); setProjectListError(null); }}
           onSave={handleSaveProject}
           onLoad={handleLoadProject}
+          onRename={handleRenameProject}
           onDelete={handleDeleteProject}
+          onRefresh={refreshSavedProjects}
           onDismissError={() => setProjectListError(null)}
-          onClose={() => { setShowProjectModal(false); setSaveError(null); setProjectListError(null); }}
         />
       )}
 
