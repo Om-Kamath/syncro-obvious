@@ -72,10 +72,45 @@ export interface CaptionStyle {
   preset?: CaptionPresetName; // named look this style came from; manual edits clear it
 }
 
+export interface CaptionTemplate {
+  id: string;
+  name: string;
+  style: CaptionStyle;
+  createdAt: number;
+}
+
 export interface ThumbnailCandidate {
   id: string;
   timestamp: number;
   quote: string;
   reason: string;
   imageDataUrl: string;
+}
+
+
+// --- Saved projects ---------------------------------------------------------
+// Metadata-only serialization of the editor state: everything JSON-safe.
+// Media bytes (File objects / blob URLs) are deliberately excluded — they need
+// a dedicated blob store (server or IndexedDB) and land with media-restore.
+
+export type SerializedVideoClip = Omit<VideoClip, 'file' | 'url'>;
+
+export type SerializedVoiceover = Omit<Voiceover, 'file' | 'url'>;
+
+export interface ProjectSnapshot {
+  clips: SerializedVideoClip[];
+  voiceover: SerializedVoiceover | null;
+  captionStyle: CaptionStyle;
+  captionsEnabled: boolean;
+}
+
+export interface SavedProjectSummary {
+  id: string;
+  name: string;
+  updatedAt: string; // ISO timestamp
+}
+
+export interface SavedProject extends SavedProjectSummary {
+  createdAt: string; // ISO timestamp
+  snapshot: ProjectSnapshot;
 }

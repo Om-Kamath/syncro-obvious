@@ -1,8 +1,10 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import WaveSurfer from 'wavesurfer.js';
 import { VideoClip, Voiceover, TransitionType } from '../types';
+import { ClipWaveform } from './ClipWaveform';
 import { Play, Pause, Scissors, Wand2, Video, Plus, Minus, Maximize2, Zap, Layers, Star, Trash2 } from 'lucide-react';
 import { DEFAULT_PPS, fitPixelsPerSecond, stepPixelsPerSecond } from '../utils/timelineZoom';
+import { findClipAtPlayhead, splitClipsAtPlayhead } from '../utils/clipSplit';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 
@@ -118,6 +120,18 @@ export const Timeline: React.FC<TimelineProps> = ({
     const availableWidth = trackAreaRef.current?.clientWidth ?? 0;
     setPixelsPerSecond(fitPixelsPerSecond(totalDuration, availableWidth));
   }, [totalDuration]);
+
+  // Blade the clip under the playhead. Refs keep the handler stable; the
+  // right half mints its own blob URL so per-clip revoke-on-delete stays valid.
+  const handleSplitAtPlayhead = useCallback(() => {
+    const next = splitClipsAtPlayhead(
+      videoClipsRef.current,
+      currentTimeRef.current,
+      Math.random().toString(36).slice(2, 11),
+      (clip) => URL.createObjectURL(clip.file),
+    );
+    if (next) onVideoClipChange(next);
+  }, [onVideoClipChange]);
 
   const seekToTime = useCallback((time: number) => {
     const clamped = Math.max(0, Math.min(time, totalDuration));
@@ -323,6 +337,10 @@ export const Timeline: React.FC<TimelineProps> = ({
 
   const sortedClips = [...videoClips].sort((a, b) => a.startTime - b.startTime);
 
+  // Split is only offered strictly inside a clip — at a boundary it would be a no-op.
+  const clipAtPlayhead = findClipAtPlayhead(videoClips, currentTime);
+  const canSplitAtPlayhead = !!clipAtPlayhead && currentTime > clipAtPlayhead.startTime;
+
   return (
     <div className="bg-white border border-gray-200 rounded-2xl overflow-hidden shadow-sm">
       {/* Header */}
@@ -361,6 +379,15 @@ export const Timeline: React.FC<TimelineProps> = ({
             </button>
           </div>
           <div className="w-px h-4 bg-gray-200" />
+          <button
+            onClick={handleSplitAtPlayhead}
+            disabled={!canSplitAtPlayhead}
+            title="Split clip at playhead"
+            aria-label="Split clip at playhead"
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-gray-500 bg-white border border-gray-200 hover:border-violet-300 hover:text-violet-600 hover:bg-violet-50 transition-all disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:border-gray-200 disabled:hover:text-gray-500 disabled:hover:bg-white ${FOCUS_RING}`}
+          >
+            <Scissors className="w-3.5 h-3.5" /> Split
+          </button>
           <button
             onClick={() => setExtraTracks(t => t + 1)}
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-gray-500 bg-white border border-gray-200 hover:border-violet-300 hover:text-violet-600 hover:bg-violet-50 transition-all ${FOCUS_RING}`}
@@ -500,6 +527,20 @@ export const Timeline: React.FC<TimelineProps> = ({
                               )}
                               style={{ left: `${clip.startTime * pixelsPerSecond}px`, width: `${effectiveDuration * pixelsPerSecond}px`, zIndex: isDragging ? 100 : 2 }}
                             >
+                              {/* Audio waveform underlay — silent/undecodable media renders nothing.
+                                  Sized to the full source duration and shifted by trimStart so the
+                                  visible slice matches what the clip plays. Negative z keeps it
+                                  above the block background but below labels; the block always sets
+                                  a zIndex, so it forms a stacking context. */}
+                              <div aria-hidden="true" className="absolute inset-0 -z-10 overflow-hidden rounded-xl pointer-events-none opacity-50">
+                                <div
+                                  className="absolute top-0 bottom-0"
+                                  style={{ width: `${clip.duration * pixelsPerSecond}px`, left: `-${(clip.trimStart ?? 0) * pixelsPerSecond}px` }}
+                                >
+                                  <ClipWaveform url={clip.url} height={TRACK_H} />
+                                </div>
+                              </div>
+
                               {/* Left trim */}
                               <div
                                 data-trim-handle="left"

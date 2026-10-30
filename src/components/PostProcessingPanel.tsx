@@ -18,14 +18,19 @@ import {
   ChevronUp,
   Hash,
   Film,
+  Trash2,
 } from 'lucide-react';
 import { VideoClip, Voiceover, CaptionStyle, CaptionMode, VideoDescription, ThumbnailCandidate } from '../types';
 import { generateDescription, identifyKeyMoments } from '../services/postProcessing';
 import { normalizeErrorMessage } from '../services/geminiClient';
 import { generateSRT, generateVTT, downloadTextFile } from '../utils/captionUtils';
 import { CAPTION_PRESETS, CAPTION_PRESET_ORDER, applyPreset } from '../utils/captionPresets';
+import { listTemplates, saveTemplate, deleteTemplate, applyTemplate, loadTemplatesResult } from '../services/captionTemplates';
+import type { CaptionTemplate } from '../types';
 import { captureVideoFrame, addQuoteOverlay, downloadDataUrl, downloadFile, getClipAtTime } from '../utils/exportUtils';
 import { EXPORT_PRESETS, DEFAULT_EXPORT_PRESET, computeDrawGeometry, type ExportPresetId } from '../utils/exportPresets';
+import { audioChannelsOf, mixAudio, sliceAudioWindow, toAudioBuffer } from '../utils/audioMix';
+import { MusicPanel, DEFAULT_MUSIC_VOLUME } from './MusicPanel';
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -312,6 +317,39 @@ export function CaptionsTab({
   const handleMode = (mode: CaptionMode) => updateStyle({ mode });
   const handlePosition = (position: 'bottom' | 'top') => updateStyle({ position });
 
+  // Templates load once, at initialization — no effect, no setState-in-effect.
+  const [initialLoad] = useState(loadTemplatesResult);
+  const [templates, setTemplates] = useState<CaptionTemplate[]>(initialLoad.templates);
+  const [templateName, setTemplateName] = useState('');
+  const [templateError, setTemplateError] = useState<string | null>(initialLoad.error);
+
+  const handleSaveTemplate = () => {
+    const name = templateName.trim();
+    if (!name) return;
+    try {
+      saveTemplate(name, captionStyle);
+      setTemplates(listTemplates());
+      setTemplateName('');
+      setTemplateError(null);
+    } catch (err) {
+      setTemplateError(err instanceof Error ? err.message : 'Failed to save template');
+    }
+  };
+
+  const handleApplyTemplate = (template: CaptionTemplate) => {
+    onStyleChange(applyTemplate(template));
+  };
+
+  const handleDeleteTemplate = (id: string) => {
+    try {
+      deleteTemplate(id);
+      setTemplates(listTemplates());
+      setTemplateError(null);
+    } catch (err) {
+      setTemplateError(err instanceof Error ? err.message : 'Failed to delete template');
+    }
+  };
+
   const modeOptions: { value: CaptionMode; label: string; desc: string }[] = [
     { value: 'lower-third', label: 'Lower Third', desc: 'Classic bar at bottom' },
     { value: 'word-highlight', label: 'Word Highlight', desc: 'Highlights current word' },
@@ -476,6 +514,71 @@ export function CaptionsTab({
             </button>
           ))}
         </div>
+      </div>
+
+      {/* Templates */}
+      <div className="space-y-2">
+        <p className="text-xs font-bold uppercase tracking-widest text-violet-500">Templates</p>
+        <div className="flex gap-2">
+          <input
+            type="text"
+            value={templateName}
+            onChange={e => setTemplateName(e.target.value)}
+            onKeyDown={e => {
+              if (e.key === 'Enter') handleSaveTemplate();
+            }}
+            placeholder="Name this style…"
+            aria-label="Template name"
+            className="flex-1 min-w-0 px-3 py-2 text-sm bg-gray-50 border border-gray-200 rounded-xl text-gray-900 placeholder-gray-400 focus:outline-none focus:border-violet-400"
+          />
+          <button
+            onClick={handleSaveTemplate}
+            disabled={!templateName.trim()}
+            className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold bg-violet-600 text-white rounded-xl hover:bg-violet-500 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
+          >
+            <Check className="w-3.5 h-3.5" />
+            Save
+          </button>
+        </div>
+        {templateError && (
+          <p className="text-xs text-red-500 px-1" role="alert">{templateError}</p>
+        )}
+        {templates.length === 0 ? (
+          <p className="text-xs text-gray-400 px-1 py-2">
+            No templates yet. Style your captions, then save them here to reuse.
+          </p>
+        ) : (
+          <div className="space-y-2">
+            {templates.map(t => (
+              <div
+                key={t.id}
+                className="flex items-center justify-between gap-3 p-2.5 bg-gray-50 border border-gray-100 rounded-xl"
+              >
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-gray-900 truncate">{t.name}</p>
+                  <p className="text-[10px] text-gray-400 font-mono">
+                    {t.style.mode} · {t.style.fontSize}px · {t.style.position}
+                  </p>
+                </div>
+                <div className="flex items-center gap-2 flex-shrink-0">
+                  <button
+                    onClick={() => handleApplyTemplate(t)}
+                    className="px-3 py-1.5 text-xs font-semibold text-violet-600 border border-gray-200 rounded-lg hover:border-violet-400 hover:bg-violet-50 transition-all"
+                  >
+                    Apply
+                  </button>
+                  <button
+                    onClick={() => handleDeleteTemplate(t.id)}
+                    aria-label={`Delete template ${t.name}`}
+                    className="p-1.5 text-gray-400 hover:text-red-500 transition-colors"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Download */}
@@ -675,6 +778,9 @@ function ExportTab({
   const [exportProgress, setExportProgress] = useState(0);
   const [presetId, setPresetId] = useState<ExportPresetId>(DEFAULT_EXPORT_PRESET);
   const preset = EXPORT_PRESETS[presetId];
+  const [musicFile, setMusicFile] = useState<File | null>(null);
+  const [musicVolume, setMusicVolume] = useState(DEFAULT_MUSIC_VOLUME);
+  const [exportError, setExportError] = useState<string | null>(null);
   const stopRef = useRef<(() => void) | null>(null);
 
   const handleDownloadAsset = (url: string, name: string) => {
@@ -698,7 +804,9 @@ function ExportTab({
     if (!voiceover || videoClips.length === 0) return;
     setIsExporting(true);
     setExportProgress(0);
+    setExportError(null);
 
+    let audioCtx: AudioContext | null = null;
     try {
       const W = preset.width;
       const H = preset.height;
@@ -721,19 +829,39 @@ function ExportTab({
         })
       ));
 
-      // Audio setup — preload fully before recording starts
-      const audioCtx = new AudioContext();
-      const audioEl = new Audio(voiceover.url);
-      audioEl.preload = 'auto';
-      await new Promise<void>((res, rej) => {
-        audioEl.addEventListener('canplaythrough', () => res(), { once: true });
-        audioEl.addEventListener('error', () => rej(new Error('Audio load failed')), { once: true });
-        audioEl.load();
-      });
-      const src = audioCtx.createMediaElementSource(audioEl);
+      // Audio setup — decode narration (and music) fully, mix them in the
+      // sample domain, then record the mixed buffer. Both files decode through
+      // the same AudioContext, so their sample rates always match.
+      audioCtx = new AudioContext();
+      const narrationBytes = voiceover.file
+        ? await voiceover.file.arrayBuffer()
+        : await fetch(voiceover.url).then(r => {
+            if (!r.ok) throw new Error(`Narration audio unavailable (HTTP ${r.status})`);
+            return r.arrayBuffer();
+          });
+      const narrationBuffer = await audioCtx.decodeAudioData(narrationBytes);
+
+      let musicBuffer: AudioBuffer | null = null;
+      if (musicFile) {
+        musicBuffer = await audioCtx.decodeAudioData(await musicFile.arrayBuffer());
+      }
+
+      const trimStartSec = voiceover.trimStart ?? 0;
+      const trimEndSec = voiceover.trimEnd ?? voiceover.duration;
+      const mixedBuffer = toAudioBuffer(
+        mixAudio(
+          sliceAudioWindow(narrationBuffer, trimStartSec, trimEndSec),
+          musicBuffer ? audioChannelsOf(musicBuffer) : null,
+          musicVolume,
+        ),
+        audioCtx,
+      );
+
       const dest = audioCtx.createMediaStreamDestination();
-      src.connect(dest);
-      src.connect(audioCtx.destination);
+      const source = audioCtx.createBufferSource();
+      source.buffer = mixedBuffer;
+      source.connect(dest);
+      source.connect(audioCtx.destination);
 
       // Build combined stream
       const canvasStream = canvas.captureStream(30);
@@ -754,10 +882,10 @@ function ExportTab({
         setIsExporting(false);
         setExportProgress(0);
         Object.values(renderVids).forEach(v => { v.pause(); v.remove(); });
+        audioCtx?.close();
       };
 
-      const audioTrimStart = voiceover.trimStart ?? 0;
-      const duration = (voiceover.trimEnd ?? voiceover.duration) - audioTrimStart;
+      const duration = trimEndSec - trimStartSec;
       const startWall = performance.now();
 
       let rafId: number;
@@ -767,7 +895,6 @@ function ExportTab({
 
         if (elapsed >= duration) {
           recorder.stop();
-          audioEl.pause();
           cancelAnimationFrame(rafId);
           return;
         }
@@ -800,7 +927,6 @@ function ExportTab({
 
       stopRef.current = () => {
         recorder.stop();
-        audioEl.pause();
         cancelAnimationFrame(rafId);
         Object.values(renderVids).forEach(v => { v.pause(); v.remove(); });
         setIsExporting(false);
@@ -808,12 +934,13 @@ function ExportTab({
       };
 
       recorder.start(100);
-      audioEl.currentTime = audioTrimStart;
-      audioEl.play();
+      source.start();
       rafId = requestAnimationFrame(draw);
     } catch (e) {
       console.error('Export failed:', e);
+      setExportError(e instanceof Error ? e.message : 'Export failed. Check your audio files and try again.');
       setIsExporting(false);
+      audioCtx?.close();
     }
   };
 
@@ -917,12 +1044,26 @@ function ExportTab({
               <div>
                 <p className="text-sm font-semibold text-gray-900">Export Combined Video</p>
                 <p className="text-xs text-violet-500 mt-0.5">
-                  Records the aligned sequence with audio
+                  Records the aligned sequence with narration audio
                   {captionsEnabled ? ' and burned-in captions' : ''}.
                   Saves as MP4 (H.264) when supported by your browser, otherwise WebM.
                 </p>
               </div>
             </div>
+
+            <MusicPanel
+              file={musicFile}
+              volume={musicVolume}
+              disabled={isExporting}
+              onFileChange={setMusicFile}
+              onVolumeChange={setMusicVolume}
+            />
+
+            {exportError && (
+              <div className="p-2 bg-red-50 border border-red-200 rounded-lg text-xs text-red-500" role="alert">
+                {exportError}
+              </div>
+            )}
 
             <div className="space-y-2">
               <p className="text-xs font-semibold text-gray-900">Aspect Preset</p>
