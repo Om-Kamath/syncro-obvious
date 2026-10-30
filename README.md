@@ -32,6 +32,7 @@ A narration-first video editor in the browser: import clips, generate narration 
 | `npm run typecheck` | Type-check only (`tsc --noEmit`) |
 | `npm run test:e2e` | Playwright e2e suite (Chromium; starts the dev server on :3000) |
 | `npm run mcp` | Start the MCP server (stdio) for agent-driven generation |
+| `npm run mcp:http` | Run the MCP server over streamable HTTP (default port 3010) |
 | `npm run clean` | Remove `dist/` |
 
 ## Media API
@@ -87,3 +88,18 @@ segment timings). Point any MCP client at the stdio transport:
 ```json
 { "command": "npx", "args": ["tsx", "server/mcp/index.ts"], "env": { "GEMINI_API_KEY": "<key>" } }
 ```
+
+Tools also cover the saved-projects API (`list_projects`, `get_project`,
+`create_project`, `update_project`, `delete_project`) and media
+(`upload_media`, `attach_media`, plus the read-only `get_timeline`).
+
+Or run the server over **streamable HTTP** for network clients:
+
+```bash
+npm run mcp:http               # listens on http://127.0.0.1:3010/mcp
+npm run mcp:http -- --port=4000   # or set SYNCRO_MCP_PORT=4000
+```
+
+The HTTP server binds loopback with DNS rebinding protection enabled and keeps
+stateful sessions (`POST`/`GET`/`DELETE` on `/mcp`). Point any MCP client at
+`http://127.0.0.1:<port>/mcp`.
