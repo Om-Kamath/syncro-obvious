@@ -17,6 +17,8 @@ export interface VideoClip {
   transitionIn?: TransitionType; // transition from the previous clip into this one
   alternatives?: Array<{ id: string; confidence: number; reason: string }>; // AI-suggested alternative clips for this position
   thumbnails?: string[];    // filmstrip JPEG data URLs sampled at import (timeline background)
+  mediaId?: string;      // /api/media id once this clip's bytes are persisted (project save)
+  mediaMissing?: boolean; // restore-time state: the saved blob could not be fetched; timeline shows a per-clip error
 }
 
 export interface Voiceover {
@@ -28,6 +30,7 @@ export interface Voiceover {
   transcription?: string;
   segments?: CaptionSegment[];
   startTime?: number;
+  mediaId?: string; // /api/media id once this voiceover's bytes are persisted (project save)
 }
 
 export interface AlignmentResult {

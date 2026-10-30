@@ -38,12 +38,23 @@ import {
   CheckCircle2,
   Activity,
   Key,
+  FolderOpen,
 } from 'lucide-react';
 import { setApiKey, hasApiKey } from './services/apiKey';
 import { chainClips, rippleDeleteMany } from './utils/chainClips';
 import { DEFAULT_CAPTION_STYLE } from './utils/captionPresets';
 import { captureFilmstrip } from './utils/clipThumbnails';
 import { motion, AnimatePresence } from 'motion/react';
+import { ProjectSaveModal } from './components/ProjectSaveModal';
+import { RestoreErrorBanner } from './components/RestoreErrorBanner';
+import {
+  deleteProject,
+  listSavedProjects,
+  restoreProject,
+  saveProject,
+  type ClipRestoreError,
+  type SavedProjectSummary,
+} from './services/projectPersistence';
 
 // Heavy Gemini export UI — code-split so it lands in its own chunk and is
 // fetched only on first open of the export modal.
@@ -260,6 +271,15 @@ export default function App() {
   const [showApiKeyModal, setShowApiKeyModal] = useState(!hasApiKey());
   const [apiKeyInput, setApiKeyInput] = useState('');
   const [importedThumbnails, setImportedThumbnails] = useState<ThumbnailCandidate[]>([]);
+  const [showProjectModal, setShowProjectModal] = useState(false);
+  const [isSavingProject, setIsSavingProject] = useState(false);
+  const [isRestoringProject, setIsRestoringProject] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [projectListError, setProjectListError] = useState<string | null>(null);
+  const [savedProjects, setSavedProjects] = useState<SavedProjectSummary[]>([]);
+  const [restoreErrors, setRestoreErrors] = useState<ClipRestoreError[]>([]);
+  const [restoreVoiceoverError, setRestoreVoiceoverError] = useState<string | null>(null);
+  const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
   const videoRefs = useRef<Record<string, HTMLVideoElement>>({});
   const transportRef = useRef<TimelineTransport | null>(null);
   const [previewHeight, setPreviewHeight] = useState(260);
@@ -538,6 +558,84 @@ export default function App() {
   const handleOnboardingNext = () => { if (onboardingStep === 1) setOnboardingStep(2); else setOnboardingStep(null); };
   const editingClip = videoClips.find(c => c.id === editingClipId) ?? null;
 
+  const refreshSavedProjects = () => {
+    try {
+      setSavedProjects(listSavedProjects());
+      setProjectListError(null);
+    } catch (err) {
+      setProjectListError(err instanceof Error ? err.message : 'Could not load saved projects.');
+    }
+  };
+
+  const handleOpenProjectModal = () => {
+    refreshSavedProjects();
+    setShowProjectModal(true);
+  };
+
+  const handleSaveProject = async (name: string) => {
+    setIsSavingProject(true);
+    setSaveError(null);
+    try {
+      const result = await saveProject({
+        name,
+        projectId: activeProjectId ?? undefined,
+        clips: videoClips,
+        voiceover,
+        captionStyle,
+        captionsEnabled,
+      });
+      setActiveProjectId(result.record.id);
+      // Adopt the persisted media ids on the live clips so re-saving skips
+      // already-uploaded blobs instead of duplicating them server-side.
+      setVideoClips(prev => prev.map(clip => {
+        const serialized = result.record.project.clips.find(sc => sc.id === clip.id);
+        return serialized?.mediaId && !clip.mediaId ? { ...clip, mediaId: serialized.mediaId } : clip;
+      }));
+      if (voiceover && !voiceover.mediaId) {
+        const savedVoiceoverId = result.record.project.voiceover?.mediaId;
+        if (savedVoiceoverId) replaceVoiceover({ ...voiceover, mediaId: savedVoiceoverId });
+      }
+      refreshSavedProjects();
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : 'Could not save the project.');
+    } finally {
+      setIsSavingProject(false);
+    }
+  };
+
+  const handleLoadProject = async (id: string) => {
+    setIsRestoringProject(true);
+    try {
+      const result = await restoreProject(id);
+      setVideoClips(chainClips(result.clips));
+      replaceVoiceover(result.voiceover);
+      setCaptionStyle(result.captionStyle);
+      setCaptionsEnabled(result.captionsEnabled);
+      setRestoreErrors(result.clipErrors);
+      setRestoreVoiceoverError(result.voiceoverError);
+      setActiveProjectId(id);
+      setCurrentTime(0);
+      setOnboardingStep(null);
+      setShowProjectModal(false);
+      setSaveError(null);
+    } catch (err) {
+      setProjectListError(err instanceof Error ? err.message : 'Could not open the project.');
+    } finally {
+      setIsRestoringProject(false);
+    }
+  };
+
+  const handleDeleteProject = (id: string) => {
+    deleteProject(id);
+    refreshSavedProjects();
+    if (activeProjectId === id) setActiveProjectId(null);
+  };
+
+  const handleDismissRestoreErrors = () => {
+    setRestoreErrors([]);
+    setRestoreVoiceoverError(null);
+  };
+
   return (
     <div className="min-h-screen bg-[#F5F5F7] text-gray-900 font-sans">
       <AnimatePresence>
@@ -591,10 +689,16 @@ export default function App() {
             <Key className="w-4 h-4" />
           </button>
           {onboardingStep === null && (
-            <button onClick={() => setOnboardingStep(1)}
-              className="px-4 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-600 text-xs font-semibold rounded-full transition-colors">
-              + New Project
-            </button>
+            <>
+              <button onClick={handleOpenProjectModal}
+                className="flex items-center gap-1.5 px-4 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-600 text-xs font-semibold rounded-full transition-colors">
+                <FolderOpen className="w-3.5 h-3.5" /> Projects
+              </button>
+              <button onClick={() => setOnboardingStep(1)}
+                className="px-4 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-600 text-xs font-semibold rounded-full transition-colors">
+                + New Project
+              </button>
+            </>
           )}
           <button
             onClick={() => setShowExportModal(true)}
@@ -605,6 +709,11 @@ export default function App() {
       </header>
 
       <main className="p-6 max-w-[1600px] mx-auto grid grid-cols-12 gap-6">
+        <RestoreErrorBanner
+          errors={restoreErrors}
+          voiceoverError={restoreVoiceoverError}
+          onDismiss={handleDismissRestoreErrors}
+        />
         <div className="col-span-3 space-y-5">
           <section className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
             <div className="px-5 py-4 border-b border-gray-50 flex items-center justify-between">
@@ -871,6 +980,21 @@ export default function App() {
           </div>
         )}
       </AnimatePresence>
+
+      {showProjectModal && (
+        <ProjectSaveModal
+          projects={savedProjects}
+          isSaving={isSavingProject}
+          isRestoring={isRestoringProject}
+          saveError={saveError}
+          loadError={projectListError}
+          onSave={handleSaveProject}
+          onLoad={handleLoadProject}
+          onDelete={handleDeleteProject}
+          onDismissError={() => setProjectListError(null)}
+          onClose={() => { setShowProjectModal(false); setSaveError(null); setProjectListError(null); }}
+        />
+      )}
 
       {/* API Key Modal */}
       <AnimatePresence>
