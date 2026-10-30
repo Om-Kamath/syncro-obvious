@@ -17,6 +17,16 @@ A narration-first video editor in the browser: import clips, generate narration 
 3. On first launch, click the key icon in the header and paste your Gemini API key.
    The key is stored in your browser's local storage (`syncro_gemini_api_key`) — it never leaves your machine and no `.env` file is needed.
 
+## Run with Docker
+
+One container serves both the built UI and the API: a multi-stage build compiles the web app with Vite, then runs the Express server over `dist/`.
+
+1. Build and start:
+   `docker compose up --build`
+2. UI: `http://localhost:3001` — API health: `http://localhost:3001/healthz`.
+
+`docker-compose.yml` mounts the named volume `syncro-data` at `/app/data` (`SYNCRO_DATA_DIR`), where the SQLite data for the saved-projects feature will live. Without Compose: `docker build -t syncro . && docker run -p 3001:3001 syncro`.
+
 ## Scripts
 
 | Script | What it does |
