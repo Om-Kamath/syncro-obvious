@@ -42,11 +42,22 @@ import {
   FolderOpen,
 } from 'lucide-react';
 import { setApiKey, hasApiKey } from './services/apiKey';
-import { chainClips, rippleDeleteMany } from './utils/chainClips';
+import { chainClips } from './utils/chainClips';
 import { DEFAULT_CAPTION_STYLE } from './utils/captionPresets';
 import { captureFilmstrip } from './utils/clipThumbnails';
 import { estimateNarrationFlowCost, estimateTtsCost } from './services/costEstimate';
 import { CostEstimateBadge } from './components/CostEstimateBadge';
+import { CommandStack } from './utils/commandStack';
+import {
+  addClipsCommand,
+  clipsEqual,
+  deleteClipsCommand,
+  releaseCommand,
+  snapshotCommand,
+  swapClipsById,
+  type TimelineEditCommand,
+} from './utils/timelineCommands';
+import type { ClipGesture } from './components/Timeline';
 import { motion, AnimatePresence } from 'motion/react';
 import { ProjectSaveModal } from './components/ProjectSaveModal';
 import { RestoreErrorBanner } from './components/RestoreErrorBanner';
@@ -298,6 +309,69 @@ export default function App() {
   const resizeStartY = useRef(0);
   const resizeStartH = useRef(0);
 
+  // Mirror of videoClips kept in lockstep via applyClips, so command snapshots
+  // and undo/redo always read fresh state even from async flows (uploads).
+  const videoClipsRef = useRef<VideoClip[]>([]);
+  const applyClips = useCallback((next: VideoClip[]) => {
+    videoClipsRef.current = next;
+    setVideoClips(next);
+  }, []);
+
+  // Undo/redo for timeline ops. Every clips mutation routes through
+  // commitCommand (or applyClips for AI-workflow enrichment, which is
+  // deliberately outside history); blob URLs pinned by add/delete commands are
+  // released by the stack's eviction callback once they can no longer be
+  // restored.
+  const [commandStack] = useState(() => new CommandStack<VideoClip[], TimelineEditCommand>(50, releaseCommand));
+  const [historyState, setHistoryState] = useState({ canUndo: false, canRedo: false });
+  const syncHistoryState = useCallback(() => {
+    setHistoryState({ canUndo: commandStack.canUndo, canRedo: commandStack.canRedo });
+  }, [commandStack]);
+
+  const commitCommand = useCallback((command: TimelineEditCommand) => {
+    applyClips(commandStack.execute(command, videoClipsRef.current));
+    syncHistoryState();
+  }, [applyClips, commandStack, syncHistoryState]);
+
+  const undoTimeline = useCallback(() => {
+    const prev = commandStack.undo(videoClipsRef.current);
+    if (prev === null) return;
+    applyClips(prev);
+    syncHistoryState();
+  }, [applyClips, commandStack, syncHistoryState]);
+
+  const redoTimeline = useCallback(() => {
+    const next = commandStack.redo(videoClipsRef.current);
+    if (next === null) return;
+    applyClips(next);
+    syncHistoryState();
+  }, [applyClips, commandStack, syncHistoryState]);
+
+  // Cmd/Ctrl+Z undoes the last timeline op; Shift+Cmd/Ctrl+Z (or Ctrl+Y) redoes.
+  // Text-entry targets keep their native per-field undo — they are skipped here.
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      const isTextEntry = target instanceof HTMLElement &&
+        (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT' || target.isContentEditable);
+      if (isTextEntry || !(e.metaKey || e.ctrlKey)) return;
+      const key = e.key.toLowerCase();
+      if (key !== 'z' && key !== 'y') return;
+      e.preventDefault();
+      if (e.shiftKey || key === 'y') redoTimeline();
+      else undoTimeline();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [undoTimeline, redoTimeline]);
+
+  // Timeline gestures arrive as one command per gesture (not per mousemove);
+  // no-op gestures (a click without a drag) are filtered out.
+  const handleClipGesture = (gesture: ClipGesture) => {
+    if (clipsEqual(gesture.before, gesture.after)) return;
+    commitCommand(snapshotCommand(gesture.kind, gesture.label, gesture.before, gesture.after));
+  };
+
   useEffect(() => {
     const onMove = (e: MouseEvent) => {
       if (!isResizingPreview.current) return;
@@ -373,12 +447,13 @@ export default function App() {
     new Promise(resolve => { const a = new Audio(url); a.onloadedmetadata = () => resolve(a.duration); a.onerror = () => resolve(0); });
 
   const handleVideoUpload = async (files: File[]) => {
+    if (files.length === 0) return;
     const newClips: VideoClip[] = await Promise.all(files.map(async (file) => {
       const url = URL.createObjectURL(file);
       const duration = await getVideoDuration(url);
       return { id: Math.random().toString(36).substr(2, 9), file, url, duration, startTime: 0, name: file.name };
     }));
-    setVideoClips(prev => [...prev, ...newClips]);
+    commitCommand(addClipsCommand(newClips));
     attachFilmstrips(newClips, setVideoClips);
   };
 
@@ -447,7 +522,7 @@ export default function App() {
         const analysis = await analyzeVideo(clip.file);
         return { ...clip, analysis };
       }));
-      setVideoClips(updatedClips);
+      applyClips(updatedClips);
       const result = await generateNarrationFromVideos(
         updatedClips.map(c => ({ name: c.name, analysis: c.analysis ?? '', duration: c.duration })), voice
       );
@@ -487,7 +562,7 @@ export default function App() {
         const analysis = await analyzeVideo(clip.file);
         return { ...clip, analysis };
       }));
-      setVideoClips(updatedClips);
+      applyClips(updatedClips);
 
       // Get the AI-suggested play order with per-position alternatives
       const entries: AlignmentEntry[] = await suggestAlignment(
@@ -509,7 +584,7 @@ export default function App() {
       const includedIds = new Set(entries.map(e => e.id));
       updatedClips.forEach(c => { if (!includedIds.has(c.id)) orderedClips.push({ ...c, alternatives: [] }); });
 
-      setVideoClips(chainClips(orderedClips));
+      applyClips(chainClips(orderedClips));
     } catch (error) {
       console.error('Alignment failed:', error);
       toast.error('Failed to align clips. Please try again.');
@@ -518,14 +593,13 @@ export default function App() {
     }
   };
 
+  // Multi-selection delete: one command per user action — one undo step.
+  // Blob URLs stay pinned by the command; the stack's eviction callback
+  // revokes them once the delete can no longer be undone.
   const removeVideos = (ids: string[]) => {
-    setVideoClips(prev => {
-      const idSet = new Set(ids);
-      prev.forEach(c => { if (idSet.has(c.id)) URL.revokeObjectURL(c.url); });
-      // Ripple delete: rechain the remaining clips so no gap is left behind,
-      // whether one clip or a multi-select batch was removed.
-      return rippleDeleteMany(prev, ids);
-    });
+    const before = videoClipsRef.current;
+    if (!ids.some(id => before.some(c => c.id === id))) return;
+    commitCommand(deleteClipsCommand(before, ids));
   };
   const removeVideo = (id: string) => removeVideos([id]);
 
@@ -552,20 +626,18 @@ export default function App() {
 
   // Swap a clip with one of its alternatives on the timeline (preserves chainClips order)
   const handleSwapClip = (clipId: string, altId: string) => {
-    setVideoClips(prev => {
-      const sorted = [...prev].sort((a, b) => a.startTime - b.startTime);
-      const idxA = sorted.findIndex(c => c.id === clipId);
-      const idxB = sorted.findIndex(c => c.id === altId);
-      if (idxA === -1 || idxB === -1) return prev;
-      // Swap the two clips in the ordered array, keeping each clip's alternatives
-      const tmp = sorted[idxA];
-      sorted[idxA] = { ...sorted[idxB], alternatives: tmp.alternatives };
-      sorted[idxB] = { ...tmp, alternatives: sorted[idxA].alternatives };
-      return chainClips(sorted);
-    });
+    const before = videoClipsRef.current;
+    const next = swapClipsById(before, clipId, altId);
+    if (!next) return;
+    commitCommand(snapshotCommand('reorder', 'Swap clips', before, next));
   };
 
-  const handleClipEdit = (updated: VideoClip) => setVideoClips(prev => prev.map(c => c.id === updated.id ? updated : c));
+  const handleClipEdit = (updated: VideoClip) => {
+    const before = videoClipsRef.current;
+    const after = before.map(c => (c.id === updated.id ? updated : c));
+    if (clipsEqual(before, after)) return;
+    commitCommand(snapshotCommand('trim', 'Edit clip', before, after));
+  };
   const handleOnboardingNext = () => { if (onboardingStep === 1) setOnboardingStep(2); else setOnboardingStep(null); };
   const editingClip = videoClips.find(c => c.id === editingClipId) ?? null;
 
@@ -923,11 +995,16 @@ export default function App() {
             voiceover={voiceover}
             onVoiceoverChange={setVoiceover}
             videoClips={videoClips}
-            onVideoClipChange={setVideoClips}
+            onVideoClipChange={applyClips}
             onAutoAlign={handleAutoAlign}
             onSwapClip={handleSwapClip}
             onDeleteClip={removeVideo}
             onDeleteClips={removeVideos}
+            onClipGesture={handleClipGesture}
+            canUndo={historyState.canUndo}
+            canRedo={historyState.canRedo}
+            onUndo={undoTimeline}
+            onRedo={redoTimeline}
             isAligning={isAligning}
             currentTime={currentTime}
             onTimeUpdate={setCurrentTime}
