@@ -21,11 +21,13 @@ import {
   Film,
   Trash2,
 } from 'lucide-react';
-import { VideoClip, Voiceover, CaptionStyle, CaptionMode, VideoDescription, ThumbnailCandidate } from '../types';
+import { VideoClip, Voiceover, CaptionStyle, CaptionMode, VideoDescription, ThumbnailCandidate, WordEmphasisStyle } from '../types';
 // Heavy export-only dependencies (Gemini post-processing, canvas frame capture) are
 // loaded on demand via dynamic import so they stay out of the initial bundle.
 // captionUtils stays static: a ~1 kB string-formatting module that render paths need
 // synchronously (chapter/thumbnail timestamps) — same trade as exportPresets below.
+import { drawCaptionOnCanvas } from '../utils/captionCanvas';
+import { DEFAULT_HIGHLIGHT_COLOR, DEFAULT_HIGHLIGHT_SCALE, DEFAULT_HIGHLIGHT_WEIGHT } from '../utils/captionEmphasis';
 import { normalizeErrorMessage } from '../services/geminiClient';
 import { generateSRT, generateVTT, downloadTextFile, generateChaptersTxt, formatChapterTime, type CaptionSegment } from '../utils/captionUtils';
 import { CAPTION_PRESETS, CAPTION_PRESET_ORDER, applyPreset } from '../utils/captionPresets';
@@ -373,6 +375,16 @@ export function CaptionsTab({
     }
   };
 
+  // Effective emphasis shown in the editor; writing initializes `wordEmphasis`
+  // from these defaults so untouched controls never change current behavior.
+  const emphasis = captionStyle.wordEmphasis ?? {
+    color: DEFAULT_HIGHLIGHT_COLOR,
+    fontWeight: DEFAULT_HIGHLIGHT_WEIGHT,
+    scale: DEFAULT_HIGHLIGHT_SCALE,
+  };
+  const handleEmphasisChange = (patch: Partial<WordEmphasisStyle>) =>
+    onStyleChange({ ...captionStyle, wordEmphasis: { ...emphasis, ...patch } });
+
   const modeOptions: { value: CaptionMode; label: string; desc: string }[] = [
     { value: 'lower-third', label: 'Lower Third', desc: 'Classic bar at bottom' },
     { value: 'word-highlight', label: 'Word Highlight', desc: 'Highlights current word' },
@@ -544,6 +556,53 @@ export function CaptionsTab({
           </div>
         </div>
       </div>
+
+      {/* Word emphasis (word-highlight mode only) */}
+      {captionStyle.mode === 'word-highlight' && (
+        <div className="space-y-3">
+          <p className="text-xs font-bold uppercase tracking-widest text-violet-500">Word Emphasis</p>
+          <p className="text-xs text-gray-400 -mt-2">Style overrides for the currently highlighted word</p>
+          <div className="flex items-center justify-between p-2.5 bg-gray-50 border border-gray-100 rounded-xl">
+            <input
+              type="color"
+              value={emphasis.color}
+              onChange={e => handleEmphasisChange({ color: e.target.value })}
+              className="w-8 h-8 rounded-lg border-0 cursor-pointer bg-transparent"
+            />
+            <span className="text-xs font-mono text-gray-500">{emphasis.color}</span>
+          </div>
+          <div className="space-y-1">
+            <div className="flex items-center justify-between">
+              <span className="text-xs text-gray-500">Weight</span>
+              <span className="text-xs font-mono font-semibold text-gray-600">{emphasis.fontWeight}</span>
+            </div>
+            <input
+              type="range"
+              min={400}
+              max={900}
+              step={100}
+              value={emphasis.fontWeight}
+              onChange={e => handleEmphasisChange({ fontWeight: Number(e.target.value) })}
+              className="w-full h-1.5 bg-gray-200 rounded-full appearance-none cursor-pointer accent-violet-600"
+            />
+          </div>
+          <div className="space-y-1">
+            <div className="flex items-center justify-between">
+              <span className="text-xs text-gray-500">Scale</span>
+              <span className="text-xs font-mono font-semibold text-gray-600">{emphasis.scale.toFixed(2)}×</span>
+            </div>
+            <input
+              type="range"
+              min={1}
+              max={1.5}
+              step={0.05}
+              value={emphasis.scale}
+              onChange={e => handleEmphasisChange({ scale: Number(e.target.value) })}
+              className="w-full h-1.5 bg-gray-200 rounded-full appearance-none cursor-pointer accent-violet-600"
+            />
+          </div>
+        </div>
+      )}
 
       {/* Position */}
       <div className="space-y-2">
@@ -1061,7 +1120,7 @@ function ExportTab({
         // Draw captions
         if (captionsEnabled && voiceover.segments) {
           const seg = voiceover.segments.find(s => elapsed >= s.start && elapsed <= s.end);
-          if (seg) drawCaptionOnCanvas(ctx, W, H, seg.text, captionStyle);
+          if (seg) drawCaptionOnCanvas(ctx, W, H, seg, captionStyle, elapsed);
         }
 
         rafId = requestAnimationFrame(draw);
@@ -1346,49 +1405,19 @@ function ExportTab({
   );
 }
 
-// ── Canvas caption renderer (used during video export recording) ────────────
-function drawCaptionOnCanvas(
-  ctx: CanvasRenderingContext2D,
-  W: number,
-  H: number,
-  text: string,
-  style: CaptionStyle
-) {
-  const fontSize = Math.max(16, Math.round(W * 0.032));
-  ctx.font = `bold ${fontSize}px Inter, Arial, sans-serif`;
-  ctx.textAlign = 'center';
-
-  const maxW = W * 0.8;
-  const words = text.split(' ').filter(Boolean);
-  if (words.length === 0) return;
-  const lines: string[] = [];
-  let cur = '';
-  for (const w of words) {
-    const test = cur ? `${cur} ${w}` : w;
-    if (ctx.measureText(test).width > maxW && cur) { lines.push(cur); cur = w; } else cur = test;
+// ── Pick the best available recording format ─────────────────────────────────
+function pickMimeType(): { mimeType: string; ext: string; label: string } {
+  const candidates = [
+    { mimeType: 'video/mp4;codecs=avc1', ext: 'mp4', label: 'MP4 · H.264' },
+    { mimeType: 'video/mp4;codecs=h264', ext: 'mp4', label: 'MP4 · H.264' },
+    { mimeType: 'video/mp4', ext: 'mp4', label: 'MP4' },
+    { mimeType: 'video/webm;codecs=vp9', ext: 'webm', label: 'WebM · VP9' },
+    { mimeType: 'video/webm', ext: 'webm', label: 'WebM' },
+  ];
+  for (const c of candidates) {
+    if (MediaRecorder.isTypeSupported(c.mimeType)) return c;
   }
-  if (cur) lines.push(cur);
-  if (lines.length === 0) return;
-
-  const lh = fontSize * 1.35;
-  const padX = 20;
-  const padY = 10;
-  const boxH = lines.length * lh + padY * 2;
-  const maxLineWidth = lines.reduce((m, l) => Math.max(m, ctx.measureText(l).width), 0);
-  const boxW = Math.min(maxLineWidth + padX * 2, W - 40);
-  const boxX = (W - boxW) / 2;
-  const boxY = style.position === 'bottom' ? H - boxH - 32 : 32;
-
-  ctx.fillStyle = style.bgColor;
-  ctx.beginPath();
-  if (ctx.roundRect) ctx.roundRect(boxX, boxY, boxW, boxH, 6);
-  else ctx.rect(boxX, boxY, boxW, boxH);
-  ctx.fill();
-
-  ctx.fillStyle = style.color;
-  lines.forEach((line, i) => {
-    ctx.fillText(line, W / 2, boxY + padY + (i + 0.82) * lh, maxW);
-  });
+  return { mimeType: 'video/webm', ext: 'webm', label: 'WebM' };
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
