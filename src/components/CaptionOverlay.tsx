@@ -1,5 +1,7 @@
+import type { CSSProperties } from 'react';
 import { CaptionSegment, CaptionStyle } from '../types';
 import { resolveWordTimings, findActiveWordIndex } from '../utils/wordTiming';
+import { resolveWordStyle } from '../utils/captionEmphasis';
 
 function cn(...classes: (string | boolean | undefined | null)[]): string {
   return classes.filter(Boolean).join(' ');
@@ -30,9 +32,14 @@ export function CaptionOverlay({
       <div className={baseContainer}>
         <div className="px-4 py-2 rounded-xl flex flex-wrap gap-x-1.5 gap-y-1 justify-center max-w-2xl"
           style={{ backgroundColor: style.bgColor, fontSize: `${style.fontSize}px` }}>
-          {words.map((w, i) => (
-            <span key={i} style={{ color: i === wordIdx ? '#7c3aed' : style.color, fontWeight: i === wordIdx ? 700 : 500, transition: 'color 0.1s' }}>{w.word}</span>
-          ))}
+          {words.map((w, i) => {
+            const ws = resolveWordStyle(style, i === wordIdx);
+            // Omit font-size at scale 1 so the span inherits the container's
+            // size — identical DOM to the un-emphasized render.
+            const wordStyle: CSSProperties = { color: ws.color, fontWeight: ws.fontWeight, transition: ws.scale !== 1 ? 'color 0.1s, font-size 0.1s' : 'color 0.1s' };
+            if (ws.scale !== 1) wordStyle.fontSize = `${style.fontSize * ws.scale}px`;
+            return <span key={i} style={wordStyle}>{w.word}</span>;
+          })}
         </div>
       </div>
     );

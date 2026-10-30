@@ -67,6 +67,13 @@ export interface CaptionSegment {
   words?: WordTiming[]; // per-word timings when the transcriber provides them; absent → even-split fallback
 }
 
+// Style overrides applied to the highlighted word in word-highlight mode.
+export interface WordEmphasisStyle {
+  color: string;      // text color for the highlighted word
+  fontWeight: number; // font weight for the highlighted word
+  scale: number;      // font-size multiplier relative to the base caption font size
+}
+
 export interface CaptionStyle {
   mode: CaptionMode;
   fontSize: number;
@@ -74,6 +81,7 @@ export interface CaptionStyle {
   bgColor: string;
   position: 'bottom' | 'top';
   preset?: CaptionPresetName; // named look this style came from; manual edits clear it
+  wordEmphasis?: WordEmphasisStyle; // undefined = built-in highlight defaults
 }
 
 export interface CaptionTemplate {
