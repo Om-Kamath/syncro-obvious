@@ -34,6 +34,7 @@ import {
 } from '../utils/thumbnailVariants';
 import { ThumbnailCompareGrid } from './ThumbnailCompareGrid';
 import { EXPORT_PRESETS, DEFAULT_EXPORT_PRESET, computeDrawGeometry, type ExportPresetId } from '../utils/exportPresets';
+import { ThumbnailVariantPicker, type ThumbnailVariantOption } from './ThumbnailVariantPicker';
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -551,7 +552,17 @@ function CaptionsTab({
 // ═══════════════════════════════════════════════════════════════════════════
 // TAB 3 — Thumbnails
 // ═══════════════════════════════════════════════════════════════════════════
-export function ThumbnailsTab({ voiceover, videoClips }: { voiceover: Voiceover; videoClips: VideoClip[] }) {
+export function ThumbnailsTab({
+  voiceover,
+  videoClips,
+  selectedThumbnailId,
+  onThumbnailSelect,
+}: {
+  voiceover: Voiceover;
+  videoClips: VideoClip[];
+  selectedThumbnailId: string | null;
+  onThumbnailSelect: (id: string | null) => void;
+}) {
   const [moments, setMoments] = useState<ThumbnailMomentVariants[]>([]);
   const [variantCount, setVariantCount] = useState(DEFAULT_VARIANT_COUNT);
   const [isGenerating, setIsGenerating] = useState(false);
@@ -567,6 +578,8 @@ export function ThumbnailsTab({ voiceover, videoClips }: { voiceover: Voiceover;
     setError('');
     setProgress('Asking AI to identify key moments…');
     setMoments([]);
+    // The old variant set is destroyed — a stale selection id could never resolve.
+    onThumbnailSelect(null);
     try {
       const found = await identifyKeyMoments(
         voiceover.transcription,
@@ -700,6 +713,21 @@ export function ThumbnailsTab({ voiceover, videoClips }: { voiceover: Voiceover;
           </motion.div>
         )}
       </AnimatePresence>
+
+      {moments.length > 0 && (
+        <ThumbnailVariantPicker
+          variants={moments.flatMap(m =>
+            m.variants.map((v): ThumbnailVariantOption => ({
+              id: `${m.id}:${v.label}`,
+              label: `Variant ${v.label} — "${m.quote}"`,
+              imageDataUrl: v.imageDataUrl,
+              description: v.description,
+            }))
+          )}
+          selectedId={selectedThumbnailId}
+          onSelect={onThumbnailSelect}
+        />
+      )}
     </div>
   );
 }
@@ -1117,6 +1145,8 @@ interface PostProcessingPanelProps {
   captionsEnabled: boolean;
   onCaptionStyleChange: (s: CaptionStyle) => void;
   onCaptionsEnabledChange: (v: boolean) => void;
+  selectedThumbnailId: string | null;
+  onThumbnailSelect: (id: string | null) => void;
 }
 
 export function PostProcessingPanel({
@@ -1126,6 +1156,8 @@ export function PostProcessingPanel({
   captionsEnabled,
   onCaptionStyleChange,
   onCaptionsEnabledChange,
+  selectedThumbnailId,
+  onThumbnailSelect,
 }: PostProcessingPanelProps) {
   const [activeTab, setActiveTab] = useState<Tab>('description');
 
@@ -1215,7 +1247,12 @@ export function PostProcessingPanel({
           )}
           {activeTab === 'thumbnails' && (
             voiceover
-              ? <ThumbnailsTab voiceover={voiceover} videoClips={videoClips} />
+              ? <ThumbnailsTab
+                  voiceover={voiceover}
+                  videoClips={videoClips}
+                  selectedThumbnailId={selectedThumbnailId}
+                  onThumbnailSelect={onThumbnailSelect}
+                />
               : <LockedState message="Upload a voiceover and run AI Auto-Align to generate thumbnails." />
           )}
           {activeTab === 'export' && (
