@@ -1,7 +1,9 @@
 
 import React, { Suspense, useState, useRef, useEffect } from 'react';
-import { VideoClip, Voiceover, CaptionStyle, CaptionSegment } from './types';
+import { VideoClip, Voiceover, CaptionStyle, CaptionSegment, ThumbnailCandidate } from './types';
 import { FileUploader } from './components/FileUploader';
+import { MediaDropLayer, type ImportedMedia } from './components/MediaDropLayer';
+import { Toast, type ToastState } from './components/Toast';
 import { Timeline } from './components/Timeline';
 import { ClipEditor } from './components/ClipEditor';
 import { VoiceoverEditor } from './components/VoiceoverEditor';
@@ -101,7 +103,7 @@ type VoiceoverMethod = 'upload' | 'script' | 'auto';
 
 function OnboardingModal({
   step, onStepComplete, onVideoUpload, videoClips, onVoiceoverUpload,
-  onGenerateFromScript, onGenerateNarration, isGenerating,
+  onGenerateFromScript, onGenerateNarration, isGenerating, onUploadRejected,
 }: {
   step: 1 | 2;
   onStepComplete: () => void;
@@ -111,6 +113,7 @@ function OnboardingModal({
   onGenerateFromScript: (script: string, voice: string) => Promise<void>;
   onGenerateNarration: (voice: string) => Promise<void>;
   isGenerating: boolean;
+  onUploadRejected?: (files: File[]) => void;
 }) {
   const [voiceoverMethod, setVoiceoverMethod] = useState<VoiceoverMethod | null>(null);
   const [script, setScript] = useState('');
@@ -162,7 +165,7 @@ function OnboardingModal({
                   <h2 className="text-2xl font-bold text-gray-900 tracking-tight">Upload your videos</h2>
                   <p className="text-sm text-gray-500 mt-1">Add all the video clips you want to sync with a voiceover.</p>
                 </div>
-                <FileUploader label="Add Videos" accept={{ 'video/*': ['.mp4', '.mov', '.webm'] }} onFilesAdded={onVideoUpload} icon={<Upload className="w-6 h-6" />} />
+                <FileUploader label="Add Videos" accept={{ 'video/*': ['.mp4', '.mov', '.webm'] }} onFilesAdded={onVideoUpload} onRejected={onUploadRejected} icon={<Upload className="w-6 h-6" />} />
                 {videoClips.length > 0 && (
                   <div className="space-y-2 max-h-52 overflow-y-auto">
                     {videoClips.map(clip => (
@@ -216,6 +219,7 @@ function OnboardingModal({
                     <motion.div key="upload-in" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden">
                       <FileUploader label="Upload Voiceover" accept={{ 'audio/*': ['.mp3', '.wav', '.m4a'] }}
                         onFilesAdded={async (files) => { await onVoiceoverUpload(files); onStepComplete(); }}
+                        onRejected={onUploadRejected}
                         multiple={false} icon={<Music className="w-5 h-5" />} />
                     </motion.div>
                   )}
@@ -283,6 +287,8 @@ export default function App() {
   const [showLogs, setShowLogs] = useState(false);
   const [showApiKeyModal, setShowApiKeyModal] = useState(!hasApiKey());
   const [apiKeyInput, setApiKeyInput] = useState('');
+  const [toast, setToast] = useState<ToastState | null>(null);
+  const [importedThumbnails, setImportedThumbnails] = useState<ThumbnailCandidate[]>([]);
   const videoRefs = useRef<Record<string, HTMLVideoElement>>({});
   const [previewHeight, setPreviewHeight] = useState(260);
   const isResizingPreview = useRef(false);
@@ -347,6 +353,43 @@ export default function App() {
     const url = URL.createObjectURL(file);
     const duration = await getAudioDuration(url);
     replaceVoiceover({ file, url, duration });
+  };
+
+  const showToast = (kind: ToastState['kind'], message: string) => setToast({ kind, message });
+
+  const describeFiles = (files: File[]) => files.map(f => `"${f.name}"`).join(', ');
+
+  const handleAppDropImport = ({ videos, audios, images }: ImportedMedia) => {
+    if (videos.length > 0) {
+      void handleVideoUpload(videos)
+        .then(() => showToast('success', `Imported ${videos.length} video${videos.length > 1 ? 's' : ''}`))
+        .catch(() => showToast('error', 'Failed to import videos'));
+    }
+    if (audios.length > 0) {
+      void handleVoiceoverUpload(audios)
+        .then(() => showToast('success', `Voiceover set to "${audios[0].name}"`))
+        .catch(() => showToast('error', 'Failed to import voiceover'));
+    }
+    if (images.length > 0) {
+      const candidates: ThumbnailCandidate[] = images.map(file => ({
+        id: `imported-${Math.random().toString(36).slice(2, 9)}`,
+        timestamp: 0,
+        quote: file.name,
+        reason: 'Imported image',
+        imageDataUrl: URL.createObjectURL(file),
+        source: 'imported' as const,
+      }));
+      setImportedThumbnails(prev => [...prev, ...candidates]);
+      showToast('success', `Imported ${images.length} image${images.length > 1 ? 's' : ''} — available in Export → Thumbnails`);
+    }
+  };
+
+  const handleAppDropRejected = (files: File[]) => {
+    showToast('error', `Unsupported file type: ${describeFiles(files)}. Drop video, audio, or image files.`);
+  };
+
+  const rejectNonVideos = (files: File[]) => {
+    showToast('error', `Unsupported file type: ${describeFiles(files)}. The video uploader accepts video files.`);
   };
 
   const handleGenerateFromScript = async (script: string, voice: string) => {
@@ -493,6 +536,7 @@ export default function App() {
             onGenerateFromScript={handleGenerateFromScript}
             onGenerateNarration={handleGenerateNarration}
             isGenerating={isGeneratingAudio}
+            onUploadRejected={handleAppDropRejected}
           />
         )}
       </AnimatePresence>
@@ -607,7 +651,7 @@ export default function App() {
               <span className="text-[10px] font-bold bg-violet-100 text-violet-600 px-2 py-0.5 rounded-full">{videoClips.length}</span>
             </div>
             <div className="p-4 space-y-3">
-              <FileUploader label="Add Videos" accept={{ 'video/*': ['.mp4', '.mov', '.webm'] }} onFilesAdded={handleVideoUpload} icon={<Video className="w-5 h-5" />} />
+              <FileUploader label="Add Videos" accept={{ 'video/*': ['.mp4', '.mov', '.webm'] }} onFilesAdded={handleVideoUpload} onRejected={rejectNonVideos} icon={<Video className="w-5 h-5" />} />
               <AnimatePresence mode="popLayout">
                 {videoClips.map((clip) => (
                   <motion.div key={clip.id} layout initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95 }}
@@ -799,6 +843,7 @@ export default function App() {
                     captionsEnabled={captionsEnabled}
                     onCaptionStyleChange={setCaptionStyle}
                     onCaptionsEnabledChange={setCaptionsEnabled}
+                    importedThumbnails={importedThumbnails}
                   />
                 </Suspense>
               </div>
@@ -867,6 +912,9 @@ export default function App() {
           </div>
         )}
       </AnimatePresence>
+
+      <MediaDropLayer onImport={handleAppDropImport} onRejected={handleAppDropRejected} />
+      {toast && <Toast toast={toast} onDismiss={() => setToast(null)} />}
     </div>
   );
 }
