@@ -1,1 +1,13 @@
 @import "tailwindcss";
+
+/*
+ * Disabled buttons must not invite clicks that do nothing: show the
+ * not-allowed cursor. Declared in the base layer so Tailwind cursor
+ * utilities (e.g. cursor-wait on a busy button, disabled:cursor-not-allowed)
+ * keep winning where a component declares them deliberately.
+ */
+@layer base {
+  button:disabled {
+    cursor: not-allowed;
+  }
+}

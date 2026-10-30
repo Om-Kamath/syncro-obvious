@@ -21,6 +21,17 @@ test.describe('Syncro app smoke', () => {
     await expect(page.getByPlaceholder('AIza…')).toBeVisible();
   });
 
+  test('disabled buttons show the not-allowed cursor', async ({ page }) => {
+    await page.goto('/');
+
+    // The forced API-key modal renders "Save Key" disabled until a key is
+    // typed. A disabled control must not invite clicks with the default
+    // cursor: the shared disabled-button style marks it not-allowed.
+    const saveKey = page.getByRole('button', { name: 'Save Key' });
+    await expect(saveKey).toBeDisabled();
+    await expect(saveKey).toHaveCSS('cursor', 'not-allowed');
+  });
+
   test('main export tabs render after onboarding is skipped', async ({ page }) => {
     await openEditorShell(page);
 
