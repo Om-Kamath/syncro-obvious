@@ -12,7 +12,7 @@ function makeCtx() {
   };
   let font = '';
   let fillStyle = '';
-  let textAlign = 'start';
+  let textAlign: CanvasTextAlign = 'start';
   const ctx = {
     get font() { return font; },
     set font(v: string) { font = v; },
