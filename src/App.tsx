@@ -87,6 +87,7 @@ function attachFilmstrips(
   }
 }
 
+
 type VoiceoverMethod = 'upload' | 'script' | 'auto';
 
 function OnboardingModal({
