@@ -41,6 +41,7 @@ import {
   FolderOpen,
 } from 'lucide-react';
 import { setApiKey, hasApiKey } from './services/apiKey';
+import { toast } from './services/toastStore';
 import { chainClips, rippleDeleteMany } from './utils/chainClips';
 import { DEFAULT_CAPTION_STYLE } from './utils/captionPresets';
 import { captureFilmstrip } from './utils/clipThumbnails';
@@ -419,10 +420,10 @@ export default function App() {
     try {
       const result = await generateAudioFromScript(script, voice);
       replaceVoiceover({ url: result.url, duration: result.duration, transcription: result.transcription });
-      showToast('success', 'Voiceover audio generated');
+      toast.success('Voiceover audio generated');
     } catch (err) {
       console.error('TTS generation failed:', err);
-      showToast('error', `Failed to generate audio: ${err instanceof Error ? err.message : String(err)}`);
+      toast.error(`Failed to generate audio: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       setIsGeneratingAudio(false);
     }
@@ -441,10 +442,10 @@ export default function App() {
         updatedClips.map(c => ({ name: c.name, analysis: c.analysis ?? '', duration: c.duration })), voice
       );
       replaceVoiceover({ url: result.url, duration: result.duration, transcription: result.transcription });
-      showToast('success', 'Narration voiceover generated');
+      toast.success('Narration voiceover generated');
     } catch (err) {
       console.error('Narration generation failed:', err);
-      showToast('error', `Failed to generate narration: ${err instanceof Error ? err.message : String(err)}`);
+      toast.error(`Failed to generate narration: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       setIsGeneratingAudio(false);
     }
@@ -501,7 +502,7 @@ export default function App() {
       setVideoClips(chainClips(orderedClips));
     } catch (error) {
       console.error('Alignment failed:', error);
-      showToast('error', 'Failed to align clips. Please try again.');
+      toast.error('Failed to align clips. Please try again.');
     } finally {
       setIsAligning(false);
     }
