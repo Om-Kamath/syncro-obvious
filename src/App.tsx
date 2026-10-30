@@ -547,7 +547,7 @@ export default function App() {
                 <Music className="w-3.5 h-3.5" /> Voiceover
               </h2>
               {voiceover && (
-                <button onClick={() => replaceVoiceover(null)} className="text-gray-300 hover:text-red-400 transition-colors p-1">
+                <button onClick={() => replaceVoiceover(null)} aria-label="Remove voiceover" className="text-gray-300 hover:text-red-400 transition-colors p-1">
                   <Trash2 className="w-3.5 h-3.5" />
                 </button>
               )}
@@ -575,7 +575,7 @@ export default function App() {
                           : `${voiceover.duration.toFixed(1)}s`}
                       </p>
                     </div>
-                    <button onClick={() => setShowVoiceoverEditor(v => !v)} className="p-1.5 text-gray-300 hover:text-violet-500 transition-colors">
+                    <button onClick={() => setShowVoiceoverEditor(v => !v)} aria-label="Edit voiceover trim" className="p-1.5 text-gray-300 hover:text-violet-500 transition-colors">
                       <Pencil className="w-3.5 h-3.5" />
                     </button>
                   </div>
@@ -633,10 +633,10 @@ export default function App() {
                         )}
                       </div>
                       <div className="flex flex-col gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <button onClick={() => setEditingClipId(clip.id)} className="p-1.5 text-gray-300 hover:text-violet-500 transition-colors">
+                        <button onClick={() => setEditingClipId(clip.id)} aria-label="Edit clip" className="p-1.5 text-gray-300 hover:text-violet-500 transition-colors">
                           <Pencil className="w-3.5 h-3.5" />
                         </button>
-                        <button onClick={() => removeVideo(clip.id)} className="p-1.5 text-gray-300 hover:text-red-400 transition-colors">
+                        <button onClick={() => removeVideo(clip.id)} aria-label="Remove clip" className="p-1.5 text-gray-300 hover:text-red-400 transition-colors">
                           <Trash2 className="w-3.5 h-3.5" />
                         </button>
                       </div>

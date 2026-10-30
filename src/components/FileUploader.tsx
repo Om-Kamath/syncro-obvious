@@ -44,7 +44,7 @@ export const FileUploader: React.FC<FileUploaderProps> = ({
           : "border-violet-300 hover:border-violet-400 bg-violet-50 hover:bg-violet-100"
       )}
     >
-      <input {...getInputProps()} />
+      <input {...getInputProps()} aria-label={label} />
       <div className={cn(
         "p-4 rounded-full transition-transform duration-300 group-hover:scale-110",
         isDragActive ? "bg-violet-200 text-violet-700" : "bg-violet-200 text-violet-600"
