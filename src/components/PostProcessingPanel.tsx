@@ -1083,6 +1083,10 @@ function ExportTab({
         if (hit) {
           const v = renderVids[hit.clip.id];
           if (v) {
+            // Recompute frames at the clip's playback rate between drift
+            // corrections so sped/slowed clips slice correctly.
+            const rate = hit.clip.playbackRate ?? 1;
+            if (v.playbackRate !== rate) v.playbackRate = rate;
             // Seek if drifted; play (muted) so frames decode
             if (Math.abs(v.currentTime - hit.localTime) > 0.2) v.currentTime = hit.localTime;
             if (v.paused) v.play().catch(() => {});

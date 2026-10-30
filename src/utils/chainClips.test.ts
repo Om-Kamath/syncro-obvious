@@ -63,6 +63,25 @@ describe('chainClips', () => {
     const last = chained[chained.length - 1];
     expect(last.startTime + (last.trimmedDuration ?? last.duration)).toBe(4);
   });
+
+  it('scales each occupancy by playback rate when chaining', () => {
+    const clips = [
+      makeClip({ id: 'a', duration: 10, playbackRate: 0.25 }), // occupies 40s
+      makeClip({ id: 'b', duration: 8, playbackRate: 4 }),     // occupies 2s
+      makeClip({ id: 'c', duration: 3 }),                      // occupies 3s
+    ];
+    const chained = chainClips(clips);
+    expect(chained.map(c => c.startTime)).toEqual([0, 40, 42]);
+  });
+
+  it('combines trims and speed in the occupancy', () => {
+    const clips = [
+      makeClip({ id: 'a', duration: 10, trimmedDuration: 2, playbackRate: 4 }), // 0.5s
+      makeClip({ id: 'b', duration: 3 }),
+    ];
+    const chained = chainClips(clips);
+    expect(chained.map(c => c.startTime)).toEqual([0, 0.5]);
+  });
 });
 
 describe('rippleDelete', () => {

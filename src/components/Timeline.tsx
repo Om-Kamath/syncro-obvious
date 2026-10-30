@@ -2,13 +2,14 @@ import React, { useEffect, useRef, useState, useCallback, useReducer } from 'rea
 import WaveSurfer from 'wavesurfer.js';
 import { VideoClip, Voiceover, TransitionType } from '../types';
 import { ClipWaveform } from './ClipWaveform';
-import { Play, Pause, Scissors, Wand2, Video, Plus, Minus, Maximize2, Zap, Layers, Star, Trash2, AlertTriangle, Keyboard } from 'lucide-react';
+import { Play, Pause, Scissors, Wand2, Video, Plus, Minus, Maximize2, Zap, Layers, Star, Trash2, AlertTriangle, Keyboard, Gauge } from 'lucide-react';
 import { DEFAULT_PPS, fitPixelsPerSecond, stepPixelsPerSecond } from '../utils/timelineZoom';
 import { findClipAtPlayhead, splitClipsAtPlayhead } from '../utils/clipSplit';
 import { selectionReducer, initialSelection, clipIdsInRect, type SelectionAction } from '../utils/selectionReducer';
 import { collectSnapCandidates, findSnap } from '../utils/timelineSnap';
 import { estimateAlignmentFlowCost } from '../services/costEstimate';
 import { CostEstimateBadge } from './CostEstimateBadge';
+import { DEFAULT_CLIP_SPEED, formatClipSpeed, getClipTimelineDuration, timelineDeltaToSourceDelta } from '../utils/clipSpeed';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 
@@ -58,6 +59,7 @@ interface TrimDragState {
   origTrimStart: number;
   origTrimmedDuration: number;
   origDuration: number;
+  origRate: number;
   origStartTime: number;
 }
 
@@ -144,7 +146,7 @@ export const Timeline: React.FC<TimelineProps> = ({
 
   const totalDuration = Math.max(
     (voiceover?.startTime ?? 0) + voiceoverEffectiveDuration,
-    ...videoClips.map((c) => c.startTime + (c.trimmedDuration ?? c.duration)),
+    ...videoClips.map((c) => c.startTime + getClipTimelineDuration(c)),
     10
   );
 
@@ -277,9 +279,10 @@ export const Timeline: React.FC<TimelineProps> = ({
     for (const track of Object.values(byTrack)) {
       const sorted = [...track].sort((a, b) => a.startTime - b.startTime);
       result.push(...sorted.map((clip, i) => {
-        const eff = clip.trimmedDuration ?? (clip.duration - (clip.trimStart ?? 0));
+        const rate = clip.playbackRate ?? DEFAULT_CLIP_SPEED;
+        const eff = (clip.trimmedDuration ?? (clip.duration - (clip.trimStart ?? 0))) / rate;
         const next = sorted[i + 1];
-        if (next && clip.startTime + eff > next.startTime) return { ...clip, trimmedDuration: Math.max(0, next.startTime - clip.startTime) };
+        if (next && clip.startTime + eff > next.startTime) return { ...clip, trimmedDuration: Math.max(0, (next.startTime - clip.startTime) * rate) };
         return clip;
       }));
     }
@@ -363,7 +366,7 @@ export const Timeline: React.FC<TimelineProps> = ({
       id: clip.id, side, startMouseX: e.clientX,
       origTrimStart: clip.trimStart ?? 0,
       origTrimmedDuration: clip.trimmedDuration ?? (clip.duration - (clip.trimStart ?? 0)),
-      origDuration: clip.duration, origStartTime: clip.startTime,
+      origDuration: clip.duration, origRate: clip.playbackRate ?? DEFAULT_CLIP_SPEED, origStartTime: clip.startTime,
     };
     setDraggingTrimId(clip.id);
   };
@@ -376,15 +379,23 @@ export const Timeline: React.FC<TimelineProps> = ({
       const deltaSec = (e.clientX - drag.startMouseX) / pixelsPerSecond;
       onVideoClipChange(videoClipsRef.current.map((c: VideoClip) => {
         if (c.id !== drag.id) return c;
+        // Drag deltas are timeline seconds; trim fields count source-media
+        // seconds — convert at the clip's playback rate.
         if (drag.side === 'right') {
           const rawEnd = drag.origStartTime + drag.origTrimmedDuration + deltaSec;
           const snappedEnd = findSnap(rawEnd, snapTargets(drag.id), pixelsPerSecond).time;
-          return { ...c, trimmedDuration: Math.max(0.5, Math.min(snappedEnd - drag.origStartTime, drag.origDuration - drag.origTrimStart)) };
+          // Snapped edge is timeline seconds; the stored window is source
+          // seconds — scale by rate before clamping.
+          const srcWindow = (snappedEnd - drag.origStartTime) * drag.origRate;
+          return { ...c, trimmedDuration: Math.max(0.5, Math.min(srcWindow, drag.origDuration - drag.origTrimStart)) };
         } else {
           const rawStart = drag.origStartTime + deltaSec;
           const snappedStart = findSnap(rawStart, snapTargets(drag.id), pixelsPerSecond).time;
-          const clamped = Math.max(0, Math.min(snappedStart - drag.origStartTime, drag.origTrimmedDuration - 0.5));
-          return { ...c, trimStart: drag.origTrimStart + clamped > 0 ? drag.origTrimStart + clamped : undefined, startTime: Math.max(0, drag.origStartTime + clamped), trimmedDuration: drag.origTrimmedDuration - clamped };
+          const maxTimelineDelta = (drag.origTrimmedDuration - 0.5) / drag.origRate;
+          const clampedTimeline = Math.max(0, Math.min(snappedStart - drag.origStartTime, maxTimelineDelta));
+          const srcDelta = timelineDeltaToSourceDelta(drag.origRate, clampedTimeline);
+          const newTrimStart = drag.origTrimStart + srcDelta;
+          return { ...c, trimStart: newTrimStart > 0 ? newTrimStart : undefined, startTime: Math.max(0, drag.origStartTime + clampedTimeline), trimmedDuration: drag.origTrimmedDuration - srcDelta };
         }
       }));
     };
@@ -465,16 +476,21 @@ export const Timeline: React.FC<TimelineProps> = ({
     else return;
     e.preventDefault(); e.stopPropagation();
     const trimStart = clip.trimStart ?? 0;
+    const rate = clip.playbackRate ?? DEFAULT_CLIP_SPEED;
     const trimmedDuration = clip.trimmedDuration ?? (clip.duration - trimStart);
     onVideoClipChange(videoClipsRef.current.map((c: VideoClip) => {
       if (c.id !== clip.id) return c;
+      // Arrow deltas are timeline seconds; trim fields count source-media seconds.
       if (side === 'right') {
-        const next = Math.max(0.5, Math.min(trimmedDuration + delta, c.duration - trimStart));
+        const srcDelta = timelineDeltaToSourceDelta(rate, delta);
+        const next = Math.max(0.5, Math.min(trimmedDuration + srcDelta, c.duration - trimStart));
         return { ...c, trimmedDuration: next };
       }
-      const clamped = Math.max(0, Math.min(delta, trimmedDuration - 0.5));
-      const newTrimStart = trimStart + clamped;
-      return { ...c, trimStart: newTrimStart > 0 ? newTrimStart : undefined, startTime: Math.max(0, c.startTime + clamped), trimmedDuration: trimmedDuration - clamped };
+      const maxTimelineDelta = (trimmedDuration - 0.5) / rate;
+      const clamped = Math.max(0, Math.min(delta, maxTimelineDelta));
+      const srcDelta = timelineDeltaToSourceDelta(rate, clamped);
+      const newTrimStart = trimStart + srcDelta;
+      return { ...c, trimStart: newTrimStart > 0 ? newTrimStart : undefined, startTime: Math.max(0, c.startTime + clamped), trimmedDuration: trimmedDuration - srcDelta };
     }));
   };
   const handleVoiceoverMouseDown = (e: React.MouseEvent) => {
@@ -710,8 +726,9 @@ export const Timeline: React.FC<TimelineProps> = ({
                       <div className="absolute inset-0 rounded-xl border border-dashed border-gray-200 bg-white/50" />
 
                       {trackClips.map((clip) => {
-                        const effectiveDuration = clip.trimmedDuration ?? clip.duration;
-                        const isActive = currentTime >= clip.startTime && currentTime < clip.startTime + effectiveDuration;
+                        const sourceDuration = clip.trimmedDuration ?? clip.duration;
+                        const timelineDuration = getClipTimelineDuration(clip);
+                        const isActive = currentTime >= clip.startTime && currentTime < clip.startTime + timelineDuration;
                         const isDragging = draggingClipId === clip.id;
                         const isTrimDragging = draggingTrimId === clip.id;
                         const hasFilmstrip = (clip.thumbnails?.length ?? 0) > 0;
@@ -722,7 +739,7 @@ export const Timeline: React.FC<TimelineProps> = ({
                               data-clip="true"
                               role="button"
                               tabIndex={0}
-                              aria-label={`Clip: ${clip.name}, ${effectiveDuration.toFixed(1)} seconds${clip.mediaMissing ? ', media missing' : ''}`}
+                              aria-label={`Clip: ${clip.name}, ${timelineDuration.toFixed(1)} seconds${clip.mediaMissing ? ', media missing' : ''}`}
                               aria-pressed={selection.ids.has(clip.id)}
                               onMouseDown={(e) => handleClipMouseDown(e, clip)}
                               onKeyDown={(e) => {
@@ -743,7 +760,7 @@ export const Timeline: React.FC<TimelineProps> = ({
                                 selection.ids.has(clip.id) && 'ring-2 ring-offset-2 ring-violet-600',
                                 FOCUS_RING
                               )}
-                              style={{ left: `${clip.startTime * pixelsPerSecond}px`, width: `${effectiveDuration * pixelsPerSecond}px`, zIndex: isDragging ? 100 : 2 }}
+                              style={{ left: `${clip.startTime * pixelsPerSecond}px`, width: `${timelineDuration * pixelsPerSecond}px`, zIndex: isDragging ? 100 : 2 }}
                             >
                               {/* Filmstrip background — sampled frames spanning the clip's full duration */}
                               {clip.thumbnails && clip.thumbnails.length > 0 && (
@@ -793,7 +810,13 @@ export const Timeline: React.FC<TimelineProps> = ({
                               {(clip.trimmedDuration !== undefined || clip.trimStart !== undefined) && (
                                 <div className="relative z-10 flex items-center gap-1 mt-0.5">
                                   <Scissors className="w-3 h-3 text-orange-400 shrink-0" />
-                                  <span className="text-[10px] text-orange-400 font-medium">{effectiveDuration.toFixed(1)}s</span>
+                                  <span className="text-[10px] text-orange-400 font-medium">{timelineDuration.toFixed(1)}s</span>
+                                </div>
+                              )}
+                              {clip.playbackRate !== undefined && clip.playbackRate !== DEFAULT_CLIP_SPEED && (
+                                <div className="flex items-center gap-1 mt-0.5">
+                                  <Gauge className="w-3 h-3 text-emerald-400 shrink-0" />
+                                  <span className="text-[10px] text-emerald-400 font-medium">{formatClipSpeed(clip.playbackRate)}</span>
                                 </div>
                               )}
                               {clip.mediaMissing && (
@@ -811,10 +834,10 @@ export const Timeline: React.FC<TimelineProps> = ({
                                 data-trim-handle="right"
                                 role="slider"
                                 tabIndex={0}
-                                aria-label={`Trim clip end: ${effectiveDuration.toFixed(1)} seconds long`}
+                                aria-label={`Trim clip end: ${sourceDuration.toFixed(1)} seconds of media`}
                                 aria-valuemin={0.5}
                                 aria-valuemax={Math.round((clip.duration - (clip.trimStart ?? 0)) * 10) / 10}
-                                aria-valuenow={Math.round(effectiveDuration * 10) / 10}
+                                aria-valuenow={Math.round(sourceDuration * 10) / 10}
                                 onMouseDown={(e) => handleTrimHandleMouseDown(e, clip, 'right')}
                                 onKeyDown={(e) => handleTrimKeyDown(e, clip, 'right')}
                                 className={`absolute right-0 top-0 bottom-0 w-2.5 flex items-center justify-center cursor-col-resize rounded-r-xl z-10 opacity-0 group-hover/clip:opacity-100 focus-visible:opacity-100 transition-opacity bg-orange-400/80 hover:bg-orange-400 ${FOCUS_RING}`}
@@ -863,10 +886,10 @@ export const Timeline: React.FC<TimelineProps> = ({
 
                             {/* Transition badge between adjacent clips */}
                             {(() => {
-                              const nextOnTrack = trackClips.find(c2 => c2.id !== clip.id && Math.abs(c2.startTime - (clip.startTime + effectiveDuration)) < 0.5);
+                              const nextOnTrack = trackClips.find(c2 => c2.id !== clip.id && Math.abs(c2.startTime - (clip.startTime + timelineDuration)) < 0.5);
                               if (!nextOnTrack) return null;
                               const transitionType = nextOnTrack.transitionIn ?? 'cut';
-                              const x = (clip.startTime + effectiveDuration) * pixelsPerSecond;
+                              const x = (clip.startTime + timelineDuration) * pixelsPerSecond;
                               return (
                                 <div key={`tr-${clip.id}`} className="absolute z-20 flex flex-col items-center justify-center" style={{ left: x - 14, top: 0, height: TRACK_H, width: 28 }}>
                                   <button

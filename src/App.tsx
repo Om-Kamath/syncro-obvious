@@ -47,6 +47,7 @@ import { DEFAULT_CAPTION_STYLE } from './utils/captionPresets';
 import { captureFilmstrip } from './utils/clipThumbnails';
 import { estimateNarrationFlowCost, estimateTtsCost } from './services/costEstimate';
 import { CostEstimateBadge } from './components/CostEstimateBadge';
+import { DEFAULT_CLIP_SPEED, clampClipSpeed, getClipTimelineDuration, timelineToSourceTime } from './utils/clipSpeed';
 import { motion, AnimatePresence } from 'motion/react';
 import { ProjectSaveModal } from './components/ProjectSaveModal';
 import { RestoreErrorBanner } from './components/RestoreErrorBanner';
@@ -344,7 +345,7 @@ export default function App() {
   useEffect(() => {
     const sorted = [...videoClips].sort((a, b) => b.startTime - a.startTime);
     const activeClip = sorted.find((clip) => {
-      const end = clip.startTime + (clip.trimmedDuration ?? clip.duration);
+      const end = clip.startTime + getClipTimelineDuration(clip);
       return currentTime >= clip.startTime && currentTime < end;
     });
     if (activeClip) {
@@ -354,8 +355,11 @@ export default function App() {
       setActiveVideoId(activeClip.id);
       const video = videoRefs.current[activeClip.id];
       if (video) {
-        const relativeTime = (currentTime - activeClip.startTime) + (activeClip.trimStart ?? 0);
+        // Timeline elapsed → source-media time at the clip's playback rate.
+        const relativeTime = timelineToSourceTime(activeClip, currentTime - activeClip.startTime);
         if (Math.abs(video.currentTime - relativeTime) > 0.1) video.currentTime = relativeTime;
+        const rate = clampClipSpeed(activeClip.playbackRate ?? DEFAULT_CLIP_SPEED);
+        if (video.playbackRate !== rate) video.playbackRate = rate;
       }
       return;
     }
@@ -492,7 +496,7 @@ export default function App() {
       // Get the AI-suggested play order with per-position alternatives
       const entries: AlignmentEntry[] = await suggestAlignment(
         transcription,
-        updatedClips.map(c => ({ id: c.id, name: c.name, analysis: c.analysis!, duration: c.trimmedDuration ?? c.duration }))
+        updatedClips.map(c => ({ id: c.id, name: c.name, analysis: c.analysis!, duration: getClipTimelineDuration(c) }))
       );
 
       // Reorder clips according to AI suggestion, storing alternatives on each clip
