@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import request from 'supertest';
 import { createApp, errorStatus } from './app';
@@ -37,6 +38,25 @@ describe('createApp', () => {
       .send({ ok: true });
     // No POST route exists yet — 404 proves the body parser did not reject the request.
     expect(res.status).toBe(404);
+  });
+});
+
+describe('GET /version', () => {
+  // Read package.json independently of server/version.ts so the test cannot
+  // pass by asserting a helper against itself.
+  const pkg = JSON.parse(
+    readFileSync(new URL('../package.json', import.meta.url), 'utf8'),
+  ) as { version: string };
+
+  it('responds 200 with { name, version } matching package.json', async () => {
+    const res = await request(createApp()).get('/version');
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ name: 'syncro', version: pkg.version });
+  });
+
+  it('reports a non-empty semver version string', async () => {
+    const res = await request(createApp()).get('/version');
+    expect(res.body.version).toMatch(/^\d+\.\d+\.\d+/);
   });
 });
 
