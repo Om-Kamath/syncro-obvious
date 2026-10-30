@@ -32,8 +32,7 @@ import { CAPTION_PRESETS, CAPTION_PRESET_ORDER, applyPreset } from '../utils/cap
 import { listTemplates, saveTemplate, deleteTemplate, applyTemplate, loadTemplatesResult } from '../services/captionTemplates';
 import { parseCaptionFile, segmentsToTranscription } from '../utils/captionImport';
 import type { CaptionTemplate } from '../types';
-import { EXPORT_PRESETS, DEFAULT_EXPORT_PRESET, computeDrawGeometry, type ExportPresetId } from '../utils/exportPresets';
-import { audioChannelsOf, mixAudio, sliceAudioWindow, toAudioBuffer } from '../utils/audioMix';
+import { EXPORT_PRESETS, DEFAULT_EXPORT_PRESET, type ExportPresetId } from '../utils/exportPresets';
 import { MusicPanel, DEFAULT_MUSIC_VOLUME } from './MusicPanel';
 import { EXPORT_CODECS, DEFAULT_EXPORT_CODEC, selectMimeType, type ExportCodecId } from '../utils/exportCodecs';
 import {
@@ -44,9 +43,21 @@ import {
   formatEstimatedSize,
   type QualityPresetId,
 } from '../utils/qualityPresets';
+// Static: the engine must exist synchronously so the cancel handle is live from
+// the first click — any await before handle creation leaves an uncancellable window.
+// The panel is lazy-loaded (PR #7), so this stays out of the entry bundle.
+import { startVideoExport, type VideoExportHandle } from '../services/videoExport';
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
+}
+
+function formatTimestamp(s: number): string {
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = Math.floor(s % 60);
+  if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
+  return `${m}:${String(sec).padStart(2, '0')}`;
 }
 
 // ── Tab button ──────────────────────────────────────────────────────────────
@@ -890,7 +901,8 @@ function ThumbnailGrid({ items }: { items: ThumbnailCandidate[] }) {
 // ═══════════════════════════════════════════════════════════════════════════
 // TAB 4 — Export
 // ═══════════════════════════════════════════════════════════════════════════
-function ExportTab({
+// Exported for tests — the panel renders it under the Export tab.
+export function ExportTab({
   voiceover,
   videoClips,
   captionStyle,
@@ -903,11 +915,11 @@ function ExportTab({
 }) {
   const [isExporting, setIsExporting] = useState(false);
   const [exportProgress, setExportProgress] = useState(0);
+  const [exportNotice, setExportNotice] = useState<{ kind: 'cancelled' | 'error'; text: string } | null>(null);
   const [presetId, setPresetId] = useState<ExportPresetId>(DEFAULT_EXPORT_PRESET);
   const preset = EXPORT_PRESETS[presetId];
   const [musicFile, setMusicFile] = useState<File | null>(null);
   const [musicVolume, setMusicVolume] = useState(DEFAULT_MUSIC_VOLUME);
-  const [exportError, setExportError] = useState<string | null>(null);
   const [codecId, setCodecId] = useState<ExportCodecId>(DEFAULT_EXPORT_CODEC);
   // Probe MediaRecorder support on render — cheap (a handful of string checks)
   // and always current, so the UI reflects what a recording would actually use.
@@ -917,7 +929,13 @@ function ExportTab({
   );
   const [qualityId, setQualityId] = useState<QualityPresetId>(DEFAULT_QUALITY_PRESET);
   const quality = QUALITY_PRESETS[qualityId];
-  const stopRef = useRef<(() => void) | null>(null);
+  const stopRef = useRef<VideoExportHandle | null>(null);
+
+  const resetExportUi = () => {
+    setIsExporting(false);
+    setExportProgress(0);
+    stopRef.current = null;
+  };
 
   const handleDownloadAsset = (url: string, name: string) => {
     const a = document.createElement('a');
@@ -938,152 +956,34 @@ function ExportTab({
     downloadTextFile(generateVTT(segments), 'captions.vtt', 'text/vtt');
   };
 
-  const handleExportVideo = async () => {
+  const handleExportVideo = () => {
     if (!voiceover || videoClips.length === 0) return;
     setIsExporting(true);
     setExportProgress(0);
-    setExportError(null);
+    setExportNotice(null);
 
-    let audioCtx: AudioContext | null = null;
-    try {
-      // Chunk is fetched once here; the draw loop and recorder.onstop close over the bindings.
-      const { downloadFile, getClipAtTime } = await import('../utils/exportUtils');
-      const W = preset.width;
-      const H = preset.height;
-      const canvas = document.createElement('canvas');
-      canvas.width = W;
-      canvas.height = H;
-      const ctx = canvas.getContext('2d')!;
-
-      // Pre-load render video elements — only store ones that loaded successfully
-      const renderVids: Record<string, HTMLVideoElement> = {};
-      await Promise.all(videoClips.map(clip =>
-        new Promise<void>(res => {
-          const v = document.createElement('video');
-          v.src = clip.url;
-          v.muted = true;
-          v.preload = 'auto';
-          v.addEventListener('loadeddata', () => { renderVids[clip.id] = v; res(); }, { once: true });
-          v.addEventListener('error', () => res(), { once: true }); // skip broken clips, don't store
-          v.load();
-        })
-      ));
-
-      // Audio setup — decode narration (and music) fully, mix them in the
-      // sample domain, then record the mixed buffer. Both files decode through
-      // the same AudioContext, so their sample rates always match.
-      audioCtx = new AudioContext();
-      const narrationBytes = voiceover.file
-        ? await voiceover.file.arrayBuffer()
-        : await fetch(voiceover.url).then(r => {
-            if (!r.ok) throw new Error(`Narration audio unavailable (HTTP ${r.status})`);
-            return r.arrayBuffer();
-          });
-      const narrationBuffer = await audioCtx.decodeAudioData(narrationBytes);
-
-      let musicBuffer: AudioBuffer | null = null;
-      if (musicFile) {
-        musicBuffer = await audioCtx.decodeAudioData(await musicFile.arrayBuffer());
-      }
-
-      const trimStartSec = voiceover.trimStart ?? 0;
-      const trimEndSec = voiceover.trimEnd ?? voiceover.duration;
-      const mixedBuffer = toAudioBuffer(
-        mixAudio(
-          sliceAudioWindow(narrationBuffer, trimStartSec, trimEndSec),
-          musicBuffer ? audioChannelsOf(musicBuffer) : null,
-          musicVolume,
-        ),
-        audioCtx,
-      );
-
-      const dest = audioCtx.createMediaStreamDestination();
-      const source = audioCtx.createBufferSource();
-      source.buffer = mixedBuffer;
-      source.connect(dest);
-      source.connect(audioCtx.destination);
-
-      // Build combined stream
-      const canvasStream = canvas.captureStream(30);
-      const combined = new MediaStream([
-        ...canvasStream.getTracks(),
-        ...dest.stream.getTracks(),
-      ]);
-
-      const { mimeType, ext } = selected;
-      const recorderOptions: MediaRecorderOptions = { mimeType };
-      if (quality.videoBitsPerSecond !== null) {
-        recorderOptions.videoBitsPerSecond = quality.videoBitsPerSecond;
-      }
-      const recorder = new MediaRecorder(combined, recorderOptions);
-      const chunks: Blob[] = [];
-      recorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
-      recorder.onstop = () => {
-        const blob = new Blob(chunks, { type: mimeType });
-        downloadFile(blob, `syncvoice-export.${ext}`);
-        setIsExporting(false);
-        setExportProgress(0);
-        Object.values(renderVids).forEach(v => { v.pause(); v.remove(); });
-        audioCtx?.close();
-      };
-
-      const duration = trimEndSec - trimStartSec;
-      const startWall = performance.now();
-
-      let rafId: number;
-      const draw = () => {
-        const elapsed = (performance.now() - startWall) / 1000;
-        setExportProgress(Math.min(elapsed / duration, 1));
-
-        if (elapsed >= duration) {
-          recorder.stop();
-          cancelAnimationFrame(rafId);
-          return;
-        }
-
-        // Find active clip
-        const hit = getClipAtTime(videoClips, elapsed);
-        ctx.fillStyle = '#000';
-        ctx.fillRect(0, 0, W, H);
-        if (hit) {
-          const v = renderVids[hit.clip.id];
-          if (v) {
-            // Seek if drifted; play (muted) so frames decode
-            if (Math.abs(v.currentTime - hit.localTime) > 0.2) v.currentTime = hit.localTime;
-            if (v.paused) v.play().catch(() => {});
-            try {
-              const g = computeDrawGeometry(preset, v.videoWidth, v.videoHeight);
-              ctx.drawImage(v, g.dx, g.dy, g.dWidth, g.dHeight);
-            } catch { /* skip */ }
-          }
-        }
-
-        // Draw captions
-        if (captionsEnabled && voiceover.segments) {
-          const seg = voiceover.segments.find(s => elapsed >= s.start && elapsed <= s.end);
-          if (seg) drawCaptionOnCanvas(ctx, W, H, seg.text, captionStyle);
-        }
-
-        rafId = requestAnimationFrame(draw);
-      };
-
-      stopRef.current = () => {
-        recorder.stop();
-        cancelAnimationFrame(rafId);
-        Object.values(renderVids).forEach(v => { v.pause(); v.remove(); });
-        setIsExporting(false);
-        setExportProgress(0);
-      };
-
-      recorder.start(100);
-      source.start();
-      rafId = requestAnimationFrame(draw);
-    } catch (e) {
-      console.error('Export failed:', e);
-      setExportError(e instanceof Error ? e.message : 'Export failed. Check your audio files and try again.');
-      setIsExporting(false);
-      audioCtx?.close();
-    }
+    // The handle is live immediately — cancel works during media preloading too.
+    stopRef.current = startVideoExport({
+      voiceover,
+      videoClips,
+      preset,
+      codecId,
+      qualityId,
+      musicFile,
+      musicVolume,
+      captionsEnabled,
+      captionStyle,
+      onProgress: setExportProgress,
+      onComplete: resetExportUi,
+      onCancelled: () => {
+        resetExportUi();
+        setExportNotice({ kind: 'cancelled', text: 'Export cancelled — no file was saved.' });
+      },
+      onError: message => {
+        resetExportUi();
+        setExportNotice({ kind: 'error', text: `Export failed: ${message}` });
+      },
+    });
   };
 
   const hasContent = videoClips.length > 0 || !!voiceover;
@@ -1209,12 +1109,6 @@ function ExportTab({
               onVolumeChange={setMusicVolume}
             />
 
-            {exportError && (
-              <div className="p-2 bg-red-50 border border-red-200 rounded-lg text-xs text-red-500" role="alert">
-                {exportError}
-              </div>
-            )}
-
             <div className="space-y-2">
               <p className="text-xs font-semibold text-gray-900">Aspect Preset</p>
               <div className="grid grid-cols-3 gap-2">
@@ -1307,14 +1201,36 @@ function ExportTab({
                   <span>Recording…</span>
                   <span>{Math.round(exportProgress * 100)}%</span>
                 </div>
-                <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
+                <div
+                  role="progressbar"
+                  aria-label="Export progress"
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-valuenow={Math.round(exportProgress * 100)}
+                  className="h-2 bg-gray-100 rounded-full overflow-hidden"
+                >
                   <motion.div
                     className="h-full bg-violet-500 rounded-full"
                     style={{ width: `${exportProgress * 100}%` }}
                     transition={{ duration: 0.1 }}
                   />
                 </div>
+                <p className="text-[10px] text-gray-400">
+                  {formatTimestamp(exportProgress * exportDuration)} of {formatTimestamp(exportDuration)}
+                </p>
               </div>
+            )}
+
+            {!isExporting && exportNotice && (
+              <p
+                role="status"
+                className={cn(
+                  'text-xs font-medium',
+                  exportNotice.kind === 'error' ? 'text-red-500' : 'text-gray-400'
+                )}
+              >
+                {exportNotice.text}
+              </p>
             )}
 
 
@@ -1329,7 +1245,7 @@ function ExportTab({
                 </button>
               ) : (
                 <button
-                  onClick={() => stopRef.current?.()}
+                  onClick={() => stopRef.current?.cancel()}
                   className="flex items-center gap-2 px-4 py-2.5 text-sm font-semibold bg-red-900/30 text-red-400 rounded-xl hover:bg-red-900/50 transition-all"
                 >
                   Cancel
@@ -1346,53 +1262,10 @@ function ExportTab({
   );
 }
 
-// ── Canvas caption renderer (used during video export recording) ────────────
-function drawCaptionOnCanvas(
-  ctx: CanvasRenderingContext2D,
-  W: number,
-  H: number,
-  text: string,
-  style: CaptionStyle
-) {
-  const fontSize = Math.max(16, Math.round(W * 0.032));
-  ctx.font = `bold ${fontSize}px Inter, Arial, sans-serif`;
-  ctx.textAlign = 'center';
-
-  const maxW = W * 0.8;
-  const words = text.split(' ').filter(Boolean);
-  if (words.length === 0) return;
-  const lines: string[] = [];
-  let cur = '';
-  for (const w of words) {
-    const test = cur ? `${cur} ${w}` : w;
-    if (ctx.measureText(test).width > maxW && cur) { lines.push(cur); cur = w; } else cur = test;
-  }
-  if (cur) lines.push(cur);
-  if (lines.length === 0) return;
-
-  const lh = fontSize * 1.35;
-  const padX = 20;
-  const padY = 10;
-  const boxH = lines.length * lh + padY * 2;
-  const maxLineWidth = lines.reduce((m, l) => Math.max(m, ctx.measureText(l).width), 0);
-  const boxW = Math.min(maxLineWidth + padX * 2, W - 40);
-  const boxX = (W - boxW) / 2;
-  const boxY = style.position === 'bottom' ? H - boxH - 32 : 32;
-
-  ctx.fillStyle = style.bgColor;
-  ctx.beginPath();
-  if (ctx.roundRect) ctx.roundRect(boxX, boxY, boxW, boxH, 6);
-  else ctx.rect(boxX, boxY, boxW, boxH);
-  ctx.fill();
-
-  ctx.fillStyle = style.color;
-  lines.forEach((line, i) => {
-    ctx.fillText(line, W / 2, boxY + padY + (i + 0.82) * lh, maxW);
-  });
-}
 
 // ═══════════════════════════════════════════════════════════════════════════
 // MAIN PANEL
+// ═══════════════════════════════════════════════════════════════════════════
 // ═══════════════════════════════════════════════════════════════════════════
 type Tab = 'description' | 'captions' | 'thumbnails' | 'export';
 
