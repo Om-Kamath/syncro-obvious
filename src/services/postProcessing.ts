@@ -1,6 +1,12 @@
 import { Type } from "@google/genai";
 import { generateContent } from "./geminiClient";
 import { MODELS } from "./models";
+import {
+  PLATFORM_PRESETS,
+  DEFAULT_PLATFORM_PRESET,
+  buildDescriptionPrompt,
+  type PlatformId,
+} from "../utils/platformPresets";
 
 /**
  * Parses the model's JSON response, raising on empty or malformed output
@@ -20,21 +26,10 @@ export function parseModelJson<T>(text: string | undefined, context: string): T 
 export async function generateDescription(
   transcription: string,
   segments: Array<{ text: string; start: number; end: number }>,
-  videoAnalyses: string[]
+  videoAnalyses: string[],
+  platform: PlatformId = DEFAULT_PLATFORM_PRESET
 ): Promise<{ summary: string; chapters: Array<{ time: number; label: string }>; hashtags: string[] }> {
-  const prompt = `You are generating a YouTube-style video description.
-
-Voiceover transcription:
-"${transcription}"
-
-Timed transcript segments: ${JSON.stringify(segments)}
-
-Video content descriptions: ${videoAnalyses.join(' | ')}
-
-Generate:
-1. A compelling 2-3 sentence summary of the video content
-2. Chapter timestamps (3-8 chapters) derived from topic shifts in the transcript. Each chapter needs a timestamp (in seconds from the start) and a short descriptive label (2-5 words)
-3. 8-12 relevant hashtags for YouTube/social media (without the # symbol)`;
+  const prompt = buildDescriptionPrompt(PLATFORM_PRESETS[platform], transcription, segments, videoAnalyses);
 
   const response = await generateContent({
     model: MODELS.flash,
