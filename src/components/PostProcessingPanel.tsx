@@ -35,17 +35,15 @@ import type { CaptionTemplate } from '../types';
 import { estimateDescriptionCost, estimateKeyMomentsCost } from '../services/costEstimate';
 import type { PostProcessingInput } from '../services/costEstimate';
 import { CostEstimateBadge } from './CostEstimateBadge';
-import { EXPORT_PRESETS, DEFAULT_EXPORT_PRESET, computeDrawGeometry, type ExportPresetId } from '../utils/exportPresets';
+import { EXPORT_PRESETS, computeDrawGeometry } from '../utils/exportPresets';
 import { audioChannelsOf, mixAudio, sliceAudioWindow, toAudioBuffer } from '../utils/audioMix';
 import { MusicPanel, DEFAULT_MUSIC_VOLUME } from './MusicPanel';
-import { EXPORT_CODECS, DEFAULT_EXPORT_CODEC, selectMimeType, type ExportCodecId } from '../utils/exportCodecs';
+import { EXPORT_CODECS, selectMimeType } from '../utils/exportCodecs';
 import {
   QUALITY_PRESETS,
-  DEFAULT_QUALITY_PRESET,
   computeExportDuration,
   estimatePresetSizeBytes,
   formatEstimatedSize,
-  type QualityPresetId,
 } from '../utils/qualityPresets';
 import { drawCaptionOnCanvas } from '../utils/captionDraw';
 import {
@@ -57,6 +55,7 @@ import {
   GIF_WIDTH_OPTIONS,
   MAX_GIF_FRAMES,
 } from '../utils/gifExport';
+import { loadExportSettings, saveExportSettings, type ExportSettings } from '../utils/exportSettings';
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -931,20 +930,28 @@ function ExportTab({
 }) {
   const [isExporting, setIsExporting] = useState(false);
   const [exportProgress, setExportProgress] = useState(0);
-  const [presetId, setPresetId] = useState<ExportPresetId>(DEFAULT_EXPORT_PRESET);
+  // Restored from localStorage so the panel matches how the user last exported.
+  const [settings, setSettings] = useState<ExportSettings>(() => loadExportSettings());
+  const presetId = settings.presetId;
   const preset = EXPORT_PRESETS[presetId];
   const [musicFile, setMusicFile] = useState<File | null>(null);
   const [musicVolume, setMusicVolume] = useState(DEFAULT_MUSIC_VOLUME);
   const [exportError, setExportError] = useState<string | null>(null);
-  const [codecId, setCodecId] = useState<ExportCodecId>(DEFAULT_EXPORT_CODEC);
-  // Probe MediaRecorder support on render — cheap (a handful of string checks)
-  // and always current, so the UI reflects what a recording would actually use.
+  // Preferred codec comes from the persisted settings. Probing support is
+  // cheap (a handful of string checks) and always current, so the UI reflects
+  // what a recording would actually use.
+  const codecId = settings.codec;
   const selected = selectMimeType(
     codecId,
     m => typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported(m)
   );
-  const [qualityId, setQualityId] = useState<QualityPresetId>(DEFAULT_QUALITY_PRESET);
-  const quality = QUALITY_PRESETS[qualityId];
+  const quality = QUALITY_PRESETS[settings.quality];
+
+  const updateSettings = (patch: Partial<ExportSettings>) => {
+    const next = { ...settings, ...patch };
+    setSettings(next);
+    saveExportSettings(next);
+  };
   const stopRef = useRef<(() => void) | null>(null);
 
   const [gifFps, setGifFps] = useState(10);
@@ -1292,7 +1299,7 @@ function ExportTab({
                 {Object.values(EXPORT_PRESETS).map(p => (
                   <button
                     key={p.id}
-                    onClick={() => setPresetId(p.id)}
+                    onClick={() => updateSettings({ presetId: p.id })}
                     disabled={isExporting}
                     className={cn(
                       'flex flex-col items-center gap-0.5 px-2 py-2 rounded-xl border text-xs font-semibold transition-all disabled:opacity-50',
@@ -1320,11 +1327,11 @@ function ExportTab({
                 {Object.values(EXPORT_CODECS).map(c => (
                   <button
                     key={c.id}
-                    onClick={() => setCodecId(c.id)}
+                    onClick={() => updateSettings({ codec: c.id })}
                     disabled={isExporting}
                     className={cn(
                       'flex flex-col items-center gap-0.5 px-2 py-2 rounded-xl border text-xs font-semibold transition-all disabled:opacity-50',
-                      codecId === c.id
+                      settings.codec === c.id
                         ? 'bg-violet-50 border-violet-400 text-violet-600'
                         : 'bg-white border-gray-200 text-gray-600 hover:border-violet-300'
                     )}
@@ -1353,11 +1360,11 @@ function ExportTab({
                 {Object.values(QUALITY_PRESETS).map(q => (
                   <button
                     key={q.id}
-                    onClick={() => setQualityId(q.id)}
+                    onClick={() => updateSettings({ quality: q.id })}
                     disabled={isExporting}
                     className={cn(
                       'flex flex-col items-center gap-0.5 px-2 py-2 rounded-xl border text-xs font-semibold transition-all disabled:opacity-50',
-                      qualityId === q.id
+                      settings.quality === q.id
                         ? 'bg-violet-50 border-violet-400 text-violet-600'
                         : 'bg-white border-gray-200 text-gray-600 hover:border-violet-300'
                     )}
