@@ -1,10 +1,10 @@
-import React, { useState, useRef, useEffect } from 'react';
+
+import React, { Suspense, useState, useRef, useEffect } from 'react';
 import { VideoClip, Voiceover, CaptionStyle } from './types';
 import { FileUploader } from './components/FileUploader';
 import { Timeline } from './components/Timeline';
 import { ClipEditor } from './components/ClipEditor';
 import { VoiceoverEditor } from './components/VoiceoverEditor';
-import { PostProcessingPanel } from './components/PostProcessingPanel';
 import { LogPanel } from './components/LogPanel';
 import {
   analyzeVoiceover,
@@ -36,6 +36,12 @@ import {
 import { setApiKey, hasApiKey } from './services/apiKey';
 import { chainClips } from './utils/chainClips';
 import { motion, AnimatePresence } from 'motion/react';
+
+// Heavy Gemini export UI — code-split so it lands in its own chunk and is
+// fetched only on first open of the export modal.
+const PostProcessingPanel = React.lazy(() =>
+  import('./components/PostProcessingPanel').then(m => ({ default: m.PostProcessingPanel })),
+);
 
 function cn(...classes: (string | boolean | undefined | null)[]): string {
   return classes.filter(Boolean).join(' ');
@@ -777,15 +783,24 @@ export default function App() {
                 </button>
               </div>
               <div className="p-5">
-                <PostProcessingPanel
-                  voiceover={voiceover}
-                  videoClips={videoClips}
-                  currentTime={currentTime}
-                  captionStyle={captionStyle}
-                  captionsEnabled={captionsEnabled}
-                  onCaptionStyleChange={setCaptionStyle}
-                  onCaptionsEnabledChange={setCaptionsEnabled}
-                />
+                <Suspense
+                  fallback={
+                    <div className="flex flex-col items-center justify-center gap-3 py-24" role="status" aria-label="Loading export panel">
+                      <Loader2 className="w-5 h-5 text-violet-600 animate-spin" />
+                      <span className="text-xs text-gray-500">Loading export panel…</span>
+                    </div>
+                  }
+                >
+                  <PostProcessingPanel
+                    voiceover={voiceover}
+                    videoClips={videoClips}
+                    currentTime={currentTime}
+                    captionStyle={captionStyle}
+                    captionsEnabled={captionsEnabled}
+                    onCaptionStyleChange={setCaptionStyle}
+                    onCaptionsEnabledChange={setCaptionsEnabled}
+                  />
+                </Suspense>
               </div>
             </motion.div>
           </div>
