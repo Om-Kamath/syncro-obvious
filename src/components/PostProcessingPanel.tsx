@@ -1089,6 +1089,7 @@ function ExportTab({
         onProgress: (done, total) => setGifProgress(done / total),
         shouldCancel: () => gifCancelRef.current,
       });
+      const { downloadFile } = await import('../utils/exportUtils');
       downloadFile(blob, 'syncvoice-export.gif');
     } catch (e) {
       if (e instanceof GifExportCancelledError) return; // user-requested stop, not a failure
