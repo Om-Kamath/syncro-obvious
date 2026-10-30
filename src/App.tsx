@@ -1,6 +1,6 @@
 
 import React, { Suspense, useState, useRef, useEffect } from 'react';
-import { VideoClip, Voiceover, CaptionStyle, CaptionSegment, ThumbnailCandidate } from './types';
+import { VideoClip, Voiceover, CaptionStyle, ThumbnailCandidate } from './types';
 import { CaptionOverlay } from './components/CaptionOverlay';
 import { FileUploader } from './components/FileUploader';
 import { MediaDropLayer, type ImportedMedia } from './components/MediaDropLayer';
