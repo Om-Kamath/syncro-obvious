@@ -6,6 +6,11 @@ const AUDIO_FILE_PATTERN = /\.(mp3|wav|ogg|oga|m4a|aac|flac|opus|weba)$/i;
 
 export const DEFAULT_MUSIC_VOLUME = 0.25;
 
+// Keyboard-focus indicator for the export settings form — same ring
+// convention as the timeline controls (visible on :focus-visible only).
+const FOCUS_RING =
+  'focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:ring-offset-1';
+
 function isAudioFile(file: File): boolean {
   return file.type.startsWith('audio/') || AUDIO_FILE_PATTERN.test(file.name);
 }
@@ -61,7 +66,7 @@ export function MusicPanel({ file, volume, disabled = false, onFileChange, onVol
             onClick={handleRemove}
             disabled={disabled}
             aria-label="Remove background music"
-            className="p-1.5 text-gray-400 rounded-lg hover:text-red-500 hover:bg-red-50 transition-all disabled:opacity-50 flex-shrink-0"
+            className={`p-1.5 text-gray-400 rounded-lg hover:text-red-500 hover:bg-red-50 transition-all disabled:opacity-50 flex-shrink-0 ${FOCUS_RING}`}
           >
             <X className="w-3.5 h-3.5" />
           </button>
@@ -91,7 +96,7 @@ export function MusicPanel({ file, volume, disabled = false, onFileChange, onVol
         <button
           onClick={() => inputRef.current?.click()}
           disabled={disabled}
-          className="w-full flex flex-col items-center gap-1 py-4 border border-dashed border-gray-300 rounded-lg text-gray-400 hover:border-violet-300 hover:text-violet-500 transition-all disabled:opacity-50"
+          className={`w-full flex flex-col items-center gap-1 py-4 border border-dashed border-gray-300 rounded-lg text-gray-400 hover:border-violet-300 hover:text-violet-500 transition-all disabled:opacity-50 ${FOCUS_RING}`}
         >
           <Plus className="w-4 h-4" />
           <span className="text-xs font-semibold">Add music track</span>
@@ -110,7 +115,7 @@ export function MusicPanel({ file, volume, disabled = false, onFileChange, onVol
             value={volume}
             disabled={disabled}
             onChange={e => onVolumeChange(Number(e.target.value))}
-            className="flex-1 accent-violet-500"
+            className={`flex-1 rounded-full accent-violet-500 ${FOCUS_RING}`}
             aria-label="Background music volume"
           />
           <span className="text-[11px] font-mono text-gray-600 w-10 text-right">{Math.round(volume * 100)}%</span>

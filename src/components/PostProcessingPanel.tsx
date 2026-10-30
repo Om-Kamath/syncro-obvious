@@ -58,6 +58,11 @@ import {
   MAX_GIF_FRAMES,
 } from '../utils/gifExport';
 
+// Keyboard-focus indicator for the export settings form — same ring
+// convention as the timeline controls (visible on :focus-visible only).
+const FOCUS_RING =
+  'focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:ring-offset-1';
+
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
@@ -918,7 +923,7 @@ function ThumbnailGrid({ items }: { items: ThumbnailCandidate[] }) {
 // ═══════════════════════════════════════════════════════════════════════════
 // TAB 4 — Export
 // ═══════════════════════════════════════════════════════════════════════════
-function ExportTab({
+export function ExportTab({
   voiceover,
   videoClips,
   captionStyle,
@@ -1193,7 +1198,7 @@ function ExportTab({
               </div>
               <button
                 onClick={() => handleDownloadAsset(voiceover.url, voiceover.file?.name ?? 'voiceover-audio')}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-gray-100 text-violet-400 rounded-lg hover:bg-violet-100 transition-all"
+                className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-gray-100 text-violet-400 rounded-lg hover:bg-violet-100 transition-all ${FOCUS_RING}`}
               >
                 <Download className="w-3.5 h-3.5" />
                 Download
@@ -1219,7 +1224,7 @@ function ExportTab({
               </div>
               <button
                 onClick={() => handleDownloadAsset(clip.url, clip.name)}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-gray-100 text-violet-400 rounded-lg hover:bg-violet-100 transition-all"
+                className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-gray-100 text-violet-400 rounded-lg hover:bg-violet-100 transition-all ${FOCUS_RING}`}
               >
                 <Download className="w-3.5 h-3.5" />
                 Download
@@ -1236,14 +1241,14 @@ function ExportTab({
           <div className="flex gap-3">
             <button
               onClick={handleDownloadSRT}
-              className="flex items-center gap-2 px-4 py-2.5 text-xs font-semibold bg-gray-50 border border-gray-200 text-violet-600 rounded-xl hover:border-violet-400 hover:bg-violet-50 transition-all"
+              className={`flex items-center gap-2 px-4 py-2.5 text-xs font-semibold bg-gray-50 border border-gray-200 text-violet-600 rounded-xl hover:border-violet-400 hover:bg-violet-50 transition-all ${FOCUS_RING}`}
             >
               <Download className="w-3.5 h-3.5" />
               SRT Captions
             </button>
             <button
               onClick={handleDownloadVTT}
-              className="flex items-center gap-2 px-4 py-2.5 text-xs font-semibold bg-gray-50 border border-gray-200 text-violet-600 rounded-xl hover:border-violet-400 hover:bg-violet-50 transition-all"
+              className={`flex items-center gap-2 px-4 py-2.5 text-xs font-semibold bg-gray-50 border border-gray-200 text-violet-600 rounded-xl hover:border-violet-400 hover:bg-violet-50 transition-all ${FOCUS_RING}`}
             >
               <Download className="w-3.5 h-3.5" />
               VTT Captions
@@ -1295,7 +1300,7 @@ function ExportTab({
                     onClick={() => setPresetId(p.id)}
                     disabled={isExporting}
                     className={cn(
-                      'flex flex-col items-center gap-0.5 px-2 py-2 rounded-xl border text-xs font-semibold transition-all disabled:opacity-50',
+                      `flex flex-col items-center gap-0.5 px-2 py-2 rounded-xl border text-xs font-semibold transition-all disabled:opacity-50 ${FOCUS_RING}`,
                       presetId === p.id
                         ? 'bg-violet-50 border-violet-400 text-violet-600'
                         : 'bg-white border-gray-200 text-gray-600 hover:border-violet-300'
@@ -1323,7 +1328,7 @@ function ExportTab({
                     onClick={() => setCodecId(c.id)}
                     disabled={isExporting}
                     className={cn(
-                      'flex flex-col items-center gap-0.5 px-2 py-2 rounded-xl border text-xs font-semibold transition-all disabled:opacity-50',
+                      `flex flex-col items-center gap-0.5 px-2 py-2 rounded-xl border text-xs font-semibold transition-all disabled:opacity-50 ${FOCUS_RING}`,
                       codecId === c.id
                         ? 'bg-violet-50 border-violet-400 text-violet-600'
                         : 'bg-white border-gray-200 text-gray-600 hover:border-violet-300'
@@ -1394,7 +1399,7 @@ function ExportTab({
                 <button
                   onClick={handleExportVideo}
                   disabled={isGifExporting}
-                  className="flex items-center gap-2 px-4 py-2.5 text-sm font-semibold bg-violet-600 text-white rounded-xl hover:bg-violet-500 transition-all disabled:opacity-50"
+                  className={`flex items-center gap-2 px-4 py-2.5 text-sm font-semibold bg-violet-600 text-white rounded-xl hover:bg-violet-500 transition-all disabled:opacity-50 ${FOCUS_RING}`}
                 >
                   <Film className="w-4 h-4" />
                   Start Export
@@ -1402,7 +1407,7 @@ function ExportTab({
               ) : (
                 <button
                   onClick={() => stopRef.current?.()}
-                  className="flex items-center gap-2 px-4 py-2.5 text-sm font-semibold bg-red-900/30 text-red-400 rounded-xl hover:bg-red-900/50 transition-all"
+                  className={`flex items-center gap-2 px-4 py-2.5 text-sm font-semibold bg-red-900/30 text-red-400 rounded-xl hover:bg-red-900/50 transition-all ${FOCUS_RING}`}
                 >
                   Cancel
                 </button>
@@ -1501,7 +1506,7 @@ function ExportTab({
                 <button
                   onClick={handleExportGif}
                   disabled={isExporting}
-                  className="flex items-center gap-2 px-4 py-2.5 text-sm font-semibold bg-violet-600 text-white rounded-xl hover:bg-violet-500 transition-all disabled:opacity-50"
+                  className={`flex items-center gap-2 px-4 py-2.5 text-sm font-semibold bg-violet-600 text-white rounded-xl hover:bg-violet-500 transition-all disabled:opacity-50 ${FOCUS_RING}`}
                 >
                   <Image className="w-4 h-4" />
                   Export GIF
@@ -1509,7 +1514,7 @@ function ExportTab({
               ) : (
                 <button
                   onClick={() => { gifCancelRef.current = true; }}
-                  className="flex items-center gap-2 px-4 py-2.5 text-sm font-semibold bg-red-900/30 text-red-400 rounded-xl hover:bg-red-900/50 transition-all"
+                  className={`flex items-center gap-2 px-4 py-2.5 text-sm font-semibold bg-red-900/30 text-red-400 rounded-xl hover:bg-red-900/50 transition-all ${FOCUS_RING}`}
                 >
                   Cancel
                 </button>
