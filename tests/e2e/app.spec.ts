@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Locator } from '@playwright/test';
 import { openEditorShell, DUMMY_VIDEO } from './support';
 
 /**
@@ -70,5 +70,33 @@ test.describe('Syncro app smoke', () => {
     await expect(page.getByRole('button', { name: 'Pause timeline' })).toBeVisible();
     await page.keyboard.press('k');
     await expect(page.getByRole('button', { name: 'Play timeline' })).toBeVisible();
+  });
+
+  test('shortcut kbd chips share one style across cheat-sheet and help overlay', async ({ page }) => {
+    await openEditorShell(page);
+    await page.waitForFunction(() => document.activeElement === document.body);
+
+    // The timeline toolbar's keyboard button opens the compact cheat-sheet.
+    await page.getByRole('button', { name: 'Keyboard shortcuts', exact: true }).click();
+    const cheatSheet = page.getByRole('note', { name: 'Keyboard shortcut cheat sheet' });
+    await expect(cheatSheet).toBeVisible();
+
+    // Blurring (not clicking — a click would close the cheat-sheet) lets the
+    // ? shell shortcut fire, opening the full help overlay on top of it.
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+    await page.keyboard.press('?');
+    const overlay = page.getByRole('dialog', { name: 'Keyboard shortcuts' });
+    await expect(overlay).toBeVisible();
+
+    // Both surfaces label keys as kbd chips, and both must use one shared chip
+    // style — mismatched chip styling between the surfaces is the defect class
+    // that made the shortcut UI feel inconsistent.
+    const chipClasses = async (scope: Locator) =>
+      new Set(await scope.locator('kbd').evaluateAll(els => els.map(el => el.className)));
+    const overlayChips = await chipClasses(overlay);
+    const cheatSheetChips = await chipClasses(cheatSheet);
+    expect(overlayChips.size).toBeGreaterThan(0);
+    expect(cheatSheetChips.size).toBeGreaterThan(0);
+    expect(cheatSheetChips).toEqual(overlayChips);
   });
 });

@@ -561,8 +561,9 @@ export const Timeline: React.FC<TimelineProps> = ({
                     {SHORTCUT_HINTS.map((hint) => (
                       <div key={hint.label} className="flex items-center justify-between gap-4">
                         <dt className="flex items-center gap-1">
+                          {/* Chip style mirrors ShortcutHelpOverlay's kbd chips — keep the two shortcut surfaces consistent. */}
                           {hint.keys.map((k) => (
-                            <kbd key={k} className="px-1.5 py-0.5 rounded border border-gray-200 bg-gray-50 font-mono text-[10px] text-gray-500">{k}</kbd>
+                            <kbd key={k} className="px-2 py-0.5 rounded-md bg-gray-100 border border-gray-200 text-xs font-mono font-semibold text-gray-600">{k}</kbd>
                           ))}
                         </dt>
                         <dd className="text-right">{hint.label}</dd>

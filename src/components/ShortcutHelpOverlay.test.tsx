@@ -42,6 +42,16 @@ describe('ShortcutHelpOverlay', () => {
     }
   });
 
+  it('renders every key as a consistently styled kbd chip', () => {
+    render(<ShortcutHelpOverlay open={true} onClose={() => {}} />);
+    const chips = screen.getByRole('dialog', { name: 'Keyboard shortcuts' }).querySelectorAll('kbd');
+    expect(chips.length).toBeGreaterThan(0);
+    // One shared chip style for every key — guards against per-key or
+    // modifier-specific styling drift (the bug this surface was fixed for).
+    const styles = new Set(Array.from(chips).map(c => c.className));
+    expect(styles.size).toBe(1);
+  });
+
   it('closes on Escape', () => {
     const onClose = vi.fn();
     render(<ShortcutHelpOverlay open={true} onClose={onClose} />);
