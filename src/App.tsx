@@ -609,7 +609,7 @@ export default function App() {
         )}
       </AnimatePresence>
 
-      <header className="h-14 bg-white/80 backdrop-blur-xl border-b border-gray-200/70 flex items-center justify-between px-8 sticky top-0 z-40">
+      <header className="min-h-14 py-2 bg-white/80 backdrop-blur-xl border-b border-gray-200/70 flex flex-wrap items-center justify-between gap-y-2 px-4 sm:px-8 sticky top-0 z-40">
         <div className="flex items-center gap-3">
           <div className="w-8 h-8 bg-violet-600 rounded-xl flex items-center justify-center text-white shadow-md shadow-violet-200">
             <Sparkles className="w-4 h-4" />
@@ -619,7 +619,7 @@ export default function App() {
             <p className="text-[9px] text-gray-400 uppercase tracking-widest font-semibold mt-0.5">Video Editing Copilot</p>
           </div>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center justify-end gap-3">
           <div className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-100 rounded-full text-xs font-medium text-gray-500">
             <Clock className="w-3 h-3" />
             {currentTime.toFixed(2)}s
