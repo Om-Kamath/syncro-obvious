@@ -28,6 +28,8 @@ const SNAPSHOT: ProjectSnapshot = {
     color: '#ffffff',
     bgColor: '#000000',
     position: 'bottom',
+    fontFamily: 'Inter, Arial, sans-serif',
+    wordHighlightColor: '#7c3aed',
   } satisfies CaptionStyle,
   captionsEnabled: true,
 };

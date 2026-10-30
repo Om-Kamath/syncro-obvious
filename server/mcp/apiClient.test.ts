@@ -39,10 +39,12 @@ function jsonResponse(status: number, body: unknown, headers: Record<string, str
 
 const CAPTION_STYLE = {
   mode: 'lower-third',
+  fontFamily: 'Inter, Arial, sans-serif',
   fontSize: 24,
   color: '#ffffff',
   bgColor: '#00000080',
   position: 'bottom',
+  wordHighlightColor: '#7c3aed',
 } as const;
 
 function projectFixture(clips: ProjectRecord['state']['clips'] = []): ProjectRecord {

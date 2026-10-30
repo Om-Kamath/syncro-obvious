@@ -49,7 +49,6 @@ import {
   type QualityPresetId,
 } from '../utils/qualityPresets';
 import { drawCaptionOnCanvas } from '../utils/captionCanvas';
-import { CaptionStyleEditor } from './CaptionStyleEditor';
 import {
   computeGifFramePlan,
   getTimelineDurationSec,
@@ -1434,8 +1433,6 @@ function ExportTab({
       </div>
     </div>
   );
-}
-
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

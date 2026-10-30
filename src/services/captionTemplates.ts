@@ -1,4 +1,5 @@
 import { CaptionMode, CaptionStyle, CaptionTemplate } from '../types';
+import { DEFAULT_CAPTION_STYLE } from '../utils/captionStyle';
 
 const STORAGE_KEY = 'syncro_caption_templates';
 
@@ -54,7 +55,15 @@ function validateStyle(value: unknown): CaptionStyle {
   if (s.position !== 'bottom' && s.position !== 'top') {
     throw new Error(`Invalid caption template style: unknown position ${String(s.position)}`);
   }
-  return { mode: s.mode as CaptionMode, fontSize: s.fontSize, color: s.color, bgColor: s.bgColor, position: s.position };
+  // Styles saved before the style editor existed lack the newer fields —
+  // fall back to the app defaults so legacy templates stay loadable.
+  const fontFamily = typeof s.fontFamily === 'string' && s.fontFamily.length > 0
+    ? s.fontFamily
+    : DEFAULT_CAPTION_STYLE.fontFamily;
+  const wordHighlightColor = typeof s.wordHighlightColor === 'string' && s.wordHighlightColor.length > 0
+    ? s.wordHighlightColor
+    : DEFAULT_CAPTION_STYLE.wordHighlightColor;
+  return { mode: s.mode as CaptionMode, fontSize: s.fontSize, color: s.color, bgColor: s.bgColor, position: s.position, fontFamily, wordHighlightColor };
 }
 
 export function applyTemplate(template: CaptionTemplate): CaptionStyle {

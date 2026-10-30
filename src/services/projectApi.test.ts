@@ -45,6 +45,8 @@ const CAPTION_STYLE: CaptionStyle = {
   color: '#ffffff',
   bgColor: '#000000',
   position: 'bottom',
+  fontFamily: 'Inter, Arial, sans-serif',
+  wordHighlightColor: '#7c3aed',
 };
 
 const STATE: ProjectStatePayload = {

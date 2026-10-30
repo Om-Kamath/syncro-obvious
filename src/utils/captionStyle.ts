@@ -3,9 +3,11 @@ import type { CaptionStyle } from '../types';
 /**
  * Default caption look. Matches the values hard-coded in the preview and
  * export renderers before the style editor existed, so captions render
- * unchanged until the user customizes them.
+ * unchanged until the user customizes them. Stamped as the Classic preset
+ * so the preset picker shows the historical default as active.
  */
 export const DEFAULT_CAPTION_STYLE: CaptionStyle = {
+  preset: 'classic',
   mode: 'lower-third',
   fontFamily: 'Inter, Arial, sans-serif',
   fontSize: 16,

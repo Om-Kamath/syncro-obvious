@@ -42,10 +42,12 @@ describe('caption presets', () => {
   it('default style is the Classic preset and preserves the historical default look', () => {
     expect(DEFAULT_CAPTION_STYLE).toEqual({
       mode: 'lower-third',
+      fontFamily: 'Inter, Arial, sans-serif',
       fontSize: 16,
       color: '#ffffff',
       bgColor: '#000000',
       position: 'bottom',
+      wordHighlightColor: '#7c3aed',
       preset: 'classic',
     });
   });

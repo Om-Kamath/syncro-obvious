@@ -1,4 +1,5 @@
 import { CaptionPresetName, CaptionStyle } from '../types';
+import { DEFAULT_CAPTION_STYLE } from './captionStyle';
 
 export interface CaptionPreset {
   name: CaptionPresetName;
@@ -15,25 +16,25 @@ export const CAPTION_PRESETS: Record<CaptionPresetName, CaptionPreset> = {
     name: 'minimal',
     label: 'Minimal',
     description: 'Clean text, no background',
-    style: { mode: 'lower-third', fontSize: 18, color: '#ffffff', bgColor: 'transparent', position: 'bottom' },
+    style: { ...DEFAULT_CAPTION_STYLE, mode: 'lower-third', fontSize: 18, color: '#ffffff', bgColor: 'transparent', position: 'bottom' },
   },
   'bold-pop': {
     name: 'bold-pop',
     label: 'Bold Pop',
     description: 'Big text on brand violet',
-    style: { mode: 'lower-third', fontSize: 28, color: '#ffffff', bgColor: '#7c3aed', position: 'bottom' },
+    style: { ...DEFAULT_CAPTION_STYLE, mode: 'lower-third', fontSize: 28, color: '#ffffff', bgColor: '#7c3aed', position: 'bottom' },
   },
   karaoke: {
     name: 'karaoke',
     label: 'Karaoke',
     description: 'Per-word fill as spoken',
-    style: { mode: 'word-highlight', fontSize: 24, color: '#ffffff', bgColor: '#111827', position: 'bottom' },
+    style: { ...DEFAULT_CAPTION_STYLE, mode: 'word-highlight', fontSize: 24, color: '#ffffff', bgColor: '#111827', position: 'bottom' },
   },
   classic: {
     name: 'classic',
     label: 'Classic',
     description: 'Subtitle bar on black',
-    style: { mode: 'lower-third', fontSize: 16, color: '#ffffff', bgColor: '#000000', position: 'bottom' },
+    style: { ...DEFAULT_CAPTION_STYLE, mode: 'lower-third', fontSize: 16, color: '#ffffff', bgColor: '#000000', position: 'bottom' },
   },
 };
 
@@ -46,5 +47,5 @@ export function applyPreset(name: CaptionPresetName): CaptionStyle {
   return { ...CAPTION_PRESETS[name].style, preset: name };
 }
 
-// The app's historical default look, now named as the Classic preset.
-export const DEFAULT_CAPTION_STYLE: CaptionStyle = applyPreset('classic');
+// The app's default look — single source of truth lives in captionStyle.ts.
+export { DEFAULT_CAPTION_STYLE };
