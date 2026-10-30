@@ -21,12 +21,14 @@ import {
   Trash2,
 } from 'lucide-react';
 import { VideoClip, Voiceover, CaptionStyle, CaptionMode, VideoDescription, ThumbnailCandidate } from '../types';
-import { generateDescription, identifyKeyMoments } from '../services/postProcessing';
+// Heavy export-only dependencies (Gemini post-processing, canvas frame capture) are
+// loaded on demand via dynamic import so they stay out of the initial bundle.
+// captionUtils stays static: a ~1 kB string-formatting module that render paths need
+// synchronously (chapter/thumbnail timestamps) — same trade as exportPresets below.
 import { normalizeErrorMessage } from '../services/geminiClient';
 import { generateSRT, generateVTT, downloadTextFile, generateChaptersTxt, formatChapterTime } from '../utils/captionUtils';
 import { listTemplates, saveTemplate, deleteTemplate, applyTemplate, loadTemplatesResult } from '../services/captionTemplates';
 import type { CaptionTemplate } from '../types';
-import { captureVideoFrame, addQuoteOverlay, downloadDataUrl, downloadFile, getClipAtTime } from '../utils/exportUtils';
 import { EXPORT_PRESETS, DEFAULT_EXPORT_PRESET, computeDrawGeometry, type ExportPresetId } from '../utils/exportPresets';
 import { audioChannelsOf, mixAudio, sliceAudioWindow, toAudioBuffer } from '../utils/audioMix';
 import { MusicPanel, DEFAULT_MUSIC_VOLUME } from './MusicPanel';
@@ -129,6 +131,7 @@ export function DescriptionTab({ voiceover, videoClips }: { voiceover: Voiceover
     setIsGenerating(true);
     setError('');
     try {
+      const { generateDescription } = await import('../services/postProcessing');
       const result = await generateDescription(
         voiceover.transcription,
         voiceover.segments,
@@ -358,13 +361,15 @@ function CaptionsTab({
   ];
 
   const handleDownloadSRT = () => {
-    if (!voiceover?.segments) return;
-    downloadTextFile(generateSRT(voiceover.segments), 'captions.srt', 'text/plain');
+    const segments = voiceover?.segments;
+    if (!segments) return;
+    downloadTextFile(generateSRT(segments), 'captions.srt', 'text/plain');
   };
 
   const handleDownloadVTT = () => {
-    if (!voiceover?.segments) return;
-    downloadTextFile(generateVTT(voiceover.segments), 'captions.vtt', 'text/vtt');
+    const segments = voiceover?.segments;
+    if (!segments) return;
+    downloadTextFile(generateVTT(segments), 'captions.vtt', 'text/vtt');
   };
 
   if (!hasSegments) {
@@ -601,6 +606,8 @@ export function ThumbnailsTab({
     setProgress('Asking AI to identify key moments…');
     setThumbnails([]);
     try {
+      const [{ identifyKeyMoments }, { getClipAtTime, captureVideoFrame, addQuoteOverlay }] =
+        await Promise.all([import('../services/postProcessing'), import('../utils/exportUtils')]);
       const moments = await identifyKeyMoments(
         voiceover.transcription,
         voiceover.segments,
@@ -747,14 +754,15 @@ function ThumbnailGrid({ items }: { items: ThumbnailCandidate[] }) {
                 <p className="text-xs font-semibold text-gray-900 line-clamp-1">"{thumb.quote}"</p>
                 <p className="text-[10px] text-violet-500 line-clamp-2">{thumb.reason}</p>
                 <button
-                  onClick={() =>
+                  onClick={async () => {
+                    const { downloadDataUrl } = await import('../utils/exportUtils');
                     downloadDataUrl(
                       thumb.imageDataUrl,
                       thumb.source === 'imported'
                         ? thumb.quote
                         : `thumbnail-${i + 1}-${thumb.timestamp}s.jpg`
-                    )
-                  }
+                    );
+                  }}
                   className="flex items-center gap-1.5 w-full justify-center py-1.5 text-xs font-semibold bg-gray-100 border border-gray-200 text-violet-400 rounded-lg hover:bg-violet-50 hover:text-violet-600 hover:border-violet-400 transition-all"
                 >
                   <Download className="w-3.5 h-3.5" />
@@ -808,13 +816,15 @@ function ExportTab({
   };
 
   const handleDownloadSRT = () => {
-    if (!voiceover?.segments) return;
-    downloadTextFile(generateSRT(voiceover.segments), 'captions.srt', 'text/plain');
+    const segments = voiceover?.segments;
+    if (!segments) return;
+    downloadTextFile(generateSRT(segments), 'captions.srt', 'text/plain');
   };
 
   const handleDownloadVTT = () => {
-    if (!voiceover?.segments) return;
-    downloadTextFile(generateVTT(voiceover.segments), 'captions.vtt', 'text/vtt');
+    const segments = voiceover?.segments;
+    if (!segments) return;
+    downloadTextFile(generateVTT(segments), 'captions.vtt', 'text/vtt');
   };
 
   const handleExportVideo = async () => {
@@ -825,6 +835,8 @@ function ExportTab({
 
     let audioCtx: AudioContext | null = null;
     try {
+      // Chunk is fetched once here; the draw loop and recorder.onstop close over the bindings.
+      const { downloadFile, getClipAtTime } = await import('../utils/exportUtils');
       const W = preset.width;
       const H = preset.height;
       const canvas = document.createElement('canvas');
