@@ -1,1 +1,8 @@
 @import "tailwindcss";
+
+/* Caption accent (active-word highlight, speaker label). Kept as a theme token
+   rather than an inline literal so themes can remap it (e.g. dark mode)
+   without touching the component. */
+@theme static {
+  --color-caption-highlight: #7c3aed;
+}

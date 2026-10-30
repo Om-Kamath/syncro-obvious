@@ -72,7 +72,7 @@ function attachFilmstrips(
   }
 }
 
-function CaptionOverlay({
+export function CaptionOverlay({
   segments,
   currentTime,
   style,
@@ -95,7 +95,7 @@ function CaptionOverlay({
         <div className="px-4 py-2 rounded-xl flex flex-wrap gap-x-1.5 gap-y-1 justify-center max-w-2xl"
           style={{ backgroundColor: style.bgColor, fontSize: `${style.fontSize}px` }}>
           {words.map((w, i) => (
-            <span key={i} style={{ color: i === wordIdx ? '#7c3aed' : style.color, fontWeight: i === wordIdx ? 700 : 500, transition: 'color 0.1s' }}>{w.word}</span>
+            <span key={i} style={{ color: i === wordIdx ? 'var(--color-caption-highlight)' : style.color, fontWeight: i === wordIdx ? 700 : 500, transition: 'color 0.1s' }}>{w.word}</span>
           ))}
         </div>
       </div>
@@ -105,7 +105,7 @@ function CaptionOverlay({
     return (
       <div className={baseContainer}>
         <div className="px-4 py-2 rounded-xl max-w-2xl" style={{ backgroundColor: style.bgColor, fontSize: `${style.fontSize}px` }}>
-          <span style={{ color: '#7c3aed', fontWeight: 700, marginRight: '8px' }}>Speaker:</span>
+          <span style={{ color: 'var(--color-caption-highlight)', fontWeight: 700, marginRight: '8px' }}>Speaker:</span>
           <span style={{ color: style.color }}>{seg.text}</span>
         </div>
       </div>

@@ -77,7 +77,7 @@ The logging gap is real: `postProcessing.ts` never imports the logger, so its ca
 
 Segment timing: estimated, everywhere. `estimateSegments` is the only timing source and has no word-level data.
 
-Preview (`CaptionOverlay`, `src/App.tsx:44-103`) supports three modes: `lower-third` (whole-segment bar), `speaker-labeled` (hard-coded "Speaker:" prefix), and `word-highlight`, which fakes word timing by even-splitting the segment across its words (`src/App.tsx:60-64`). The hard-highlight color `#7c3aed` is not part of `CaptionStyle` and cannot be themed.
+Preview (`CaptionOverlay`, `src/App.tsx:44-103`) supports three modes: `lower-third` (whole-segment bar), `speaker-labeled` (hard-coded "Speaker:" prefix), and `word-highlight`, which fakes word timing by even-splitting the segment across its words (`src/App.tsx:60-64`). The hard-highlight color is the `--color-caption-highlight` theme token (`src/index.css`) rather than an inline literal, so themes can restyle it.
 
 Export burn-in (`drawCaptionOnCanvas`, `src/components/PostProcessingPanel.tsx:974-1007`) is **not** at parity with preview: it renders the whole segment text in a single box using `captionStyle` color/position, ignores the caption mode entirely (no word-highlight), and scales font size from canvas width. Choosing "Word Highlight" in preview then exporting yields a plain box in the video. This is a known gap, not a bug someone has claimed.
 
