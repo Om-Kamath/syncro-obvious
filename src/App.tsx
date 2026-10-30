@@ -125,7 +125,7 @@ type VoiceoverMethod = 'upload' | 'script' | 'auto';
 
 function OnboardingModal({
   step, onStepComplete, onVideoUpload, videoClips, onVoiceoverUpload,
-  onGenerateFromScript, onGenerateNarration, isGenerating, onUploadRejected,
+  onGenerateFromScript, onGenerateNarration, isGenerating, onUploadRejected, isImporting,
 }: {
   step: 1 | 2;
   onStepComplete: () => void;
@@ -136,6 +136,7 @@ function OnboardingModal({
   onGenerateNarration: (voice: string) => Promise<void>;
   isGenerating: boolean;
   onUploadRejected?: (files: File[]) => void;
+  isImporting: boolean;
 }) {
   const [voiceoverMethod, setVoiceoverMethod] = useState<VoiceoverMethod | null>(null);
   const [script, setScript] = useState('');
@@ -187,7 +188,7 @@ function OnboardingModal({
                   <h2 className="text-2xl font-bold text-gray-900 tracking-tight">Upload your videos</h2>
                   <p className="text-sm text-gray-500 mt-1">Add all the video clips you want to sync with a voiceover.</p>
                 </div>
-                <FileUploader label="Add Videos" accept={{ 'video/*': ['.mp4', '.mov', '.webm'] }} onFilesAdded={onVideoUpload} onRejected={onUploadRejected} icon={<Upload className="w-6 h-6" />} />
+                <FileUploader label="Add Videos" accept={{ 'video/*': ['.mp4', '.mov', '.webm'] }} onFilesAdded={onVideoUpload} onRejected={onUploadRejected} busy={isImporting} icon={<Upload className="w-6 h-6" />} />
                 {videoClips.length > 0 && (
                   <div className="space-y-2 max-h-52 overflow-y-auto">
                     {videoClips.map(clip => (
@@ -242,7 +243,7 @@ function OnboardingModal({
                       <FileUploader label="Upload Voiceover" accept={{ 'audio/*': ['.mp3', '.wav', '.m4a'] }}
                         onFilesAdded={async (files) => { await onVoiceoverUpload(files); onStepComplete(); }}
                         onRejected={onUploadRejected}
-                        multiple={false} icon={<Music className="w-5 h-5" />} />
+                        multiple={false} busy={isImporting} icon={<Music className="w-5 h-5" />} />
                     </motion.div>
                   )}
                   {voiceoverMethod === 'script' && (
@@ -298,6 +299,7 @@ export default function App() {
   const [currentTime, setCurrentTime] = useState(0);
   const [activeVideoId, setActiveVideoId] = useState<string | null>(null);
   const [isGeneratingAudio, setIsGeneratingAudio] = useState(false);
+  const [isImportingMedia, setIsImportingMedia] = useState(false);
   const [editingClipId, setEditingClipId] = useState<string | null>(null);
   const [showVoiceoverEditor, setShowVoiceoverEditor] = useState(false);
   const [captionsEnabled, setCaptionsEnabled] = useState(false);
@@ -393,21 +395,31 @@ export default function App() {
     new Promise(resolve => { const a = new Audio(url); a.onloadedmetadata = () => resolve(a.duration); a.onerror = () => resolve(0); });
 
   const handleVideoUpload = async (files: File[]) => {
-    const newClips: VideoClip[] = await Promise.all(files.map(async (file) => {
-      const url = URL.createObjectURL(file);
-      const duration = await getVideoDuration(url);
-      return { id: Math.random().toString(36).substr(2, 9), file, url, duration, startTime: 0, name: file.name };
-    }));
-    setVideoClips(prev => [...prev, ...newClips]);
-    attachFilmstrips(newClips, setVideoClips);
+    setIsImportingMedia(true);
+    try {
+      const newClips: VideoClip[] = await Promise.all(files.map(async (file) => {
+        const url = URL.createObjectURL(file);
+        const duration = await getVideoDuration(url);
+        return { id: Math.random().toString(36).substr(2, 9), file, url, duration, startTime: 0, name: file.name };
+      }));
+      setVideoClips(prev => [...prev, ...newClips]);
+      attachFilmstrips(newClips, setVideoClips);
+    } finally {
+      setIsImportingMedia(false);
+    }
   };
 
   const handleVoiceoverUpload = async (files: File[]) => {
     if (files.length === 0) return;
     const file = files[0];
-    const url = URL.createObjectURL(file);
-    const duration = await getAudioDuration(url);
-    replaceVoiceover({ file, url, duration });
+    setIsImportingMedia(true);
+    try {
+      const url = URL.createObjectURL(file);
+      const duration = await getAudioDuration(url);
+      replaceVoiceover({ file, url, duration });
+    } finally {
+      setIsImportingMedia(false);
+    }
   };
 
   const showToast = (kind: ToastState['kind'], message: string) => setToast({ kind, message });
@@ -605,6 +617,7 @@ export default function App() {
             onGenerateNarration={handleGenerateNarration}
             isGenerating={isGeneratingAudio}
             onUploadRejected={handleAppDropRejected}
+            isImporting={isImportingMedia}
           />
         )}
       </AnimatePresence>
@@ -719,7 +732,7 @@ export default function App() {
               <span className="text-[10px] font-bold bg-violet-100 text-violet-600 px-2 py-0.5 rounded-full">{videoClips.length}</span>
             </div>
             <div className="p-4 space-y-3">
-              <FileUploader label="Add Videos" accept={{ 'video/*': ['.mp4', '.mov', '.webm'] }} onFilesAdded={handleVideoUpload} onRejected={rejectNonVideos} icon={<Video className="w-5 h-5" />} />
+              <FileUploader label="Add Videos" accept={{ 'video/*': ['.mp4', '.mov', '.webm'] }} onFilesAdded={handleVideoUpload} onRejected={rejectNonVideos} busy={isImportingMedia} icon={<Video className="w-5 h-5" />} />
               <AnimatePresence mode="popLayout">
                 {videoClips.map((clip) => (
                   <motion.div key={clip.id} layout initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95 }}
