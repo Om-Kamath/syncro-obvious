@@ -1,4 +1,7 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, beforeEach, afterEach } from 'vitest';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import request from 'supertest';
 import { createApp, errorStatus } from './app';
 
@@ -57,5 +60,57 @@ describe('errorStatus', () => {
   it('rejects non-error status values', () => {
     expect(errorStatus({ status: 200 })).toBe(500);
     expect(errorStatus({ status: 999 })).toBe(500);
+  });
+});
+
+describe('static file serving', () => {
+  let distDir: string;
+  let prevEnv: string | undefined;
+
+  beforeEach(() => {
+    prevEnv = process.env.SYNCRO_DIST_DIR;
+    distDir = mkdtempSync(join(tmpdir(), 'syncro-dist-'));
+    writeFileSync(join(distDir, 'index.html'), '<!doctype html><html><body>syncro</body></html>');
+    mkdirSync(join(distDir, 'assets'));
+    writeFileSync(join(distDir, 'assets', 'app.js'), 'export const app = "syncro";\n');
+    process.env.SYNCRO_DIST_DIR = distDir;
+  });
+
+  afterEach(() => {
+    if (prevEnv === undefined) delete process.env.SYNCRO_DIST_DIR;
+    else process.env.SYNCRO_DIST_DIR = prevEnv;
+    rmSync(distDir, { recursive: true, force: true });
+  });
+
+  it('serves index.html at /', async () => {
+    const res = await request(createApp()).get('/');
+    expect(res.status).toBe(200);
+    expect(res.headers['content-type']).toContain('text/html');
+    expect(res.text).toContain('syncro');
+  });
+
+  it('serves asset files from the dist directory', async () => {
+    const res = await request(createApp()).get('/assets/app.js');
+    expect(res.status).toBe(200);
+    expect(res.text).toContain('syncro');
+  });
+
+  it('still answers API routes before static files', async () => {
+    const res = await request(createApp()).get('/api/health');
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ ok: true });
+  });
+
+  it('keeps the JSON 404 for unknown paths not in dist', async () => {
+    const res = await request(createApp()).get('/no-such-file');
+    expect(res.status).toBe(404);
+    expect(res.body.error).toContain('/no-such-file');
+  });
+
+  it('stays API-only when the dist directory does not exist', async () => {
+    process.env.SYNCRO_DIST_DIR = join(distDir, 'does-not-exist');
+    const res = await request(createApp()).get('/');
+    expect(res.status).toBe(404);
+    expect(res.body.error).toContain('/');
   });
 });

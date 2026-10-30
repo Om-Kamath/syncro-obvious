@@ -1,4 +1,5 @@
-import { join } from 'node:path';
+import { existsSync } from 'node:fs';
+import { join, resolve } from 'node:path';
 import express, { type Express, type NextFunction, type Request, type Response } from 'express';
 import { createMediaRouter } from './media/media.router';
 import { MediaStore } from './media/media.store';
@@ -41,6 +42,15 @@ export function createApp(options: AppOptions = {}): Express {
   app.get('/api/health', (_req, res) => {
     res.json({ ok: true });
   });
+
+  // Serve the built web app when it exists — the container layout runs one
+  // Express process for dist/ + API (see Dockerfile). SYNCRO_DIST_DIR
+  // overrides the directory; an absent directory keeps `server:dev`
+  // API-only so local development still goes through the Vite dev server.
+  const distDir = process.env.SYNCRO_DIST_DIR ?? resolve('dist');
+  if (existsSync(distDir)) {
+    app.use(express.static(distDir));
+  }
 
   // JSON 404 for anything unmatched — keeps API clients on JSON responses.
   app.use((req, res) => {
