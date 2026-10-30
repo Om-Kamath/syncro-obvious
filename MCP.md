@@ -22,7 +22,7 @@ This guide covers what the MCP surface is today, how to launch it in each transp
    ```
 
    The database file defaults to `syncro.db` in the repo root; set `SYNCRO_DB_PATH` to change it. Create a project from the UI ("Save" in the editor) or `POST /api/projects` — the MCP tools can only see what the REST API returns.
-3. No Gemini key is needed for the read, media, and export tools — only Syncro's server itself needs one, and only for AI features. The server-side generation and publishing tools (`generate_narration`, `generate_tts`, `generate_captions`, `generate_description`, `generate_thumbnails`) are the exception: they call Gemini from the MCP server process and need `GEMINI_API_KEY` in that process's environment (see [Tool reference](#tool-reference)).
+3. No Gemini key is needed for the read and media tools — only Syncro's server itself needs one, and only for AI features. The server-side generation tools (`generate_narration`, `generate_tts`, `generate_captions`, `generate_description`, `generate_thumbnails`) are planned and documented here ahead of their branch landing; once shipped they call Gemini from the MCP server process and need `GEMINI_API_KEY` in that process's environment (see [Tool reference](#tool-reference)).
 
 ## Launching the server
 
@@ -30,33 +30,33 @@ The MCP server has two transports. Pick one:
 
 | Transport | Command | Who connects | Notes |
 | --- | --- | --- | --- |
-| **stdio** (default) | `npm run mcp` | One client per process; the client spawns it | What Claude Desktop and most agent configs use. Protocol on stdout, diagnostics on stderr. |
-| **streamable HTTP** | `npm run mcp:http` | Any number of clients against a shared server | Serves `POST/GET/DELETE /mcp` on `127.0.0.1:3010` (stateful sessions, DNS-rebinding protection, loopback bind). |
+| **stdio** (the only transport on `main` today) | `npm run mcp:start` | One client per process; the client spawns it | What Claude Desktop and most agent configs use. Protocol on stdout, diagnostics on stderr. |
+| **streamable HTTP** | `npm run mcp:http` | Any number of clients against a shared server | **Planned — not on `main` yet** (branch `task/pr-66-mcp-streamable-http`). Will serve `POST/GET/DELETE /mcp` on `127.0.0.1:3010` (stateful sessions, DNS-rebinding protection, loopback bind). |
 
 Handy invocations:
 
 ```sh
-npm run mcp                                   # stdio — usually launched by the client, not you
-SYNCRO_API_URL=http://localhost:3001 npm run mcp   # explicit API base (this is the default)
-npm run mcp:http -- --port=4000               # HTTP on a custom port
-SYNCRO_MCP_PORT=4000 npm run mcp:http         # same, via env
+npm run mcp:start                            # stdio — usually launched by the client, not you
+SYNCRO_SERVER_URL=http://localhost:3001 npm run mcp:start   # explicit API base (this is the default)
+npm run mcp:http -- --port=4000              # HTTP on a custom port (planned — not on main yet)
+SYNCRO_MCP_PORT=4000 npm run mcp:http        # same, via env (planned — not on main yet)
 ```
 
 ### Configuration reference
 
 | Variable / flag | Applies to | Default | Meaning |
 | --- | --- | --- | --- |
-| `SYNCRO_API_URL` | both | `http://localhost:3001` | Base URL of the Syncro REST API. Trailing slashes are trimmed. |
-| `--port=<n>` / `SYNCRO_MCP_PORT` | HTTP | `3010` | Port for the streamable-HTTP listener. The flag wins over the env var; non-integer or out-of-range values fail loudly at startup. |
+| `SYNCRO_SERVER_URL` | stdio | `http://localhost:3001` | Base URL of the Syncro REST API (read by `server/mcp/index.ts`). Trailing slashes are trimmed. |
+| `SYNCRO_MCP_MAX_UPLOAD_BYTES` | stdio | server default | Maximum accepted media upload size; an invalid value is ignored with a stderr warning. |
 | `SYNCRO_DB_PATH` | REST API | `syncro.db` | SQLite file the REST API persists to (set when launching `server:start`, not the MCP server). |
 
 ## Tool reference
 
-Fifteen tools ship across the MCP branches, grouped by capability below. Every tool returns JSON, pretty-printed, as a single text content block. Expected failures — unknown project id, API unreachable, missing key — come back as tool errors (`isError: true`) with a human-readable message, so an agent can react to them; they never crash the session.
+Four tools are live on `main` today — `list_projects`, `get_project`, `upload_media`, and `attach_media` — and ten more are documented below from their open branches so this guide stays stable as they land. Every tool returns JSON, pretty-printed, as a single text content block. Expected failures — unknown project id, API unreachable, missing key — come back as tool errors (`isError: true`) with a human-readable message, so an agent can react to them; they never crash the session.
 
-Read tools (`list_projects`, `get_project`, `get_timeline`) and `trigger_export` ship on the MCP scaffold and companion branches; mutation, media, and generation tools arrive on their own branches (each listed with its branch name). They all register into the same server entrypoint, so the launch contract in the previous section holds regardless of which tool groups have landed.
+Read tools (`list_projects`, `get_project`) and the media tools (`upload_media`, `attach_media`) are shipped. Mutation, generation, export, and the second read tool `get_timeline` arrive on their own branches (each listed with its branch name and marked "not on `main` yet"). They all register into the same server entrypoint, so the launch contract in the previous section holds regardless of which tool groups have landed.
 
-### Reading projects
+### Reading projects — `list_projects` and `get_project` shipped; `get_timeline` not on `main` yet
 
 #### `list_projects`
 
@@ -101,7 +101,7 @@ Reads back a project's timeline as an agent-friendly snapshot: the ordered clip 
 | --- | --- | --- | --- |
 | `projectId` | string | yes | Id of the saved project to inspect |
 
-### Exports (`task/pr-79-mcp-export-trigger-tool`)
+### Exports (`task/pr-79-mcp-export-trigger-tool`) — not on `main` yet
 
 #### `trigger_export`
 
@@ -115,7 +115,7 @@ Enqueues a server-side export job for a saved project. Returns the new job id an
 
 Returns `{ "jobId": "…", "status": "queued" }`.
 
-### Mutating projects (`task/pr-31-mcp-project-mutation-tools`)
+### Mutating projects (`task/pr-31-mcp-project-mutation-tools`) — not on `main` yet
 
 #### `create_project`
 
@@ -144,7 +144,7 @@ Permanently deletes a saved project by id and returns the deleted id. Fails with
 | --- | --- | --- | --- |
 | `id` | string | yes | Project id to delete |
 
-### Media (`task/pr-32-mcp-media-tools`)
+### Media (`task/pr-32-mcp-media-tools`) — shipped on `main`
 
 #### `upload_media`
 
@@ -169,7 +169,7 @@ Attaches an uploaded media asset to a project as a new clip (updates the project
 | `duration` | number | yes | Media duration in seconds — the server cannot probe it from bytes |
 | `name` | string | no | Clip name; defaults to the media filename or id |
 
-### Server-side generation (`task/pr-33-mcp-generation-tools`)
+### Server-side generation (`task/pr-33-mcp-generation-tools`) — not on `main` yet
 
 These tools call Gemini directly from the MCP server process (not through the UI), so they require **`GEMINI_API_KEY` in the MCP server's environment** — add it to the config's `env` block. Without it the tools fail fast with a clear message.
 
@@ -260,9 +260,9 @@ Put this in `claude_desktop_config.json` — macOS: `~/Library/Application Suppo
   "mcpServers": {
     "syncro": {
       "command": "npm",
-      "args": ["run", "mcp"],
+      "args": ["run", "mcp:start"],
       "cwd": "/absolute/path/to/syncro-obvious",
-      "env": { "SYNCRO_API_URL": "http://localhost:3001" }
+      "env": { "SYNCRO_SERVER_URL": "http://localhost:3001" }
     }
   }
 }
@@ -277,8 +277,8 @@ If a client spawns the command from an arbitrary working directory (i.e. it igno
   "mcpServers": {
     "syncro": {
       "command": "npm",
-      "args": ["--prefix=/absolute/path/to/syncro-obvious", "run", "mcp"],
-      "env": { "SYNCRO_API_URL": "http://localhost:3001" }
+      "args": ["--prefix=/absolute/path/to/syncro-obvious", "run", "mcp:start"],
+      "env": { "SYNCRO_SERVER_URL": "http://localhost:3001" }
     }
   }
 }
@@ -325,14 +325,14 @@ The configs in this guide were executed, not just written. Every launch form bel
 
 The mutation, media, generation, and publishing tool groups are documented from their branches' code and test suites (`server/mcp/*.test.ts` on each branch) rather than live-driven here — their contracts above come straight from the registered input schemas. Everything else in the table was executed end-to-end.
 
-The stdio servers read through `SYNCRO_API_URL` (default `http://localhost:3001`); the HTTP-transport branch runs against an in-memory store until it is rebased onto the DB-backed REST API, which is why its `list_projects` call returned an empty array in the evidence above. If this guide and the code ever disagree, the launch surface is `package.json`'s `mcp*` scripts, tool registrations live in the modules under `server/mcp/` (`tools.ts`, `mcpServer.ts`, `mediaTools.ts`, `server.ts`, …), and env handling sits beside each entrypoint (`api.ts` on the scaffold, `gemini.ts` on the publishing branch) — fix the docs against those, or the code against this guide.
+The stdio servers read through `SYNCRO_SERVER_URL` (default `http://localhost:3001`); the HTTP-transport branch runs against an in-memory store until it is rebased onto the DB-backed REST API, which is why its `list_projects` call returned an empty array in the evidence above. If this guide and the code ever disagree, the launch surface is `package.json`'s `mcp*` scripts, tool registrations live in the modules under `server/mcp/` (`tools.ts`, `mcpServer.ts`, `mediaTools.ts`, `server.ts`, …), and env handling sits beside each entrypoint (`api.ts` on the scaffold, `gemini.ts` on the publishing branch) — fix the docs against those, or the code against this guide.
 
 ## Troubleshooting
 
 | Symptom | Cause | Fix |
 | --- | --- | --- |
 | Tool errors say `fetch failed` / `ECONNREFUSED` | The REST API on `:3001` isn't running | Start it: `npm run server:start` |
-| `list_projects` returns `[]` but the UI shows projects | The MCP server and the UI are talking to different API instances or databases | Check `SYNCRO_API_URL` and `SYNCRO_DB_PATH` on both |
+| `list_projects` returns `[]` but the UI shows projects | The MCP server and the UI are talking to different API instances or databases | Check `SYNCRO_SERVER_URL` and `SYNCRO_DB_PATH` on both |
 | Tool error `Project not found: <id>` | Stale id (the project was deleted or re-created) | Re-run `list_projects` for current ids |
 | HTTP client can't connect | The HTTP server binds `127.0.0.1` with host-allowlist protection | Use `localhost` or `127.0.0.1` in the client URL, not another host name |
 | Port 3010 already in use | Another `mcp:http` instance is running | `--port=<n>` or `SYNCRO_MCP_PORT` to move it |

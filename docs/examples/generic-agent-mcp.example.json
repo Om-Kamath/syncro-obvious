@@ -2,10 +2,10 @@
   "mcpServers": {
     "syncro": {
       "command": "npm",
-      "args": ["run", "mcp"],
+      "args": ["run", "mcp:start"],
       "cwd": "/absolute/path/to/syncro-obvious",
       "env": {
-        "SYNCRO_API_URL": "http://localhost:3001"
+        "SYNCRO_SERVER_URL": "http://localhost:3001"
       }
     }
   }

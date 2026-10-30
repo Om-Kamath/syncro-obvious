@@ -33,17 +33,17 @@ The SQLite database defaults to `syncro.db` (override with `SYNCRO_DB_PATH`); un
 
 ## What Syncro does
 
-**Editing** — multi-track timeline with drag reordering, snapping, trim, ripple delete, clip split, playback-speed control, filmstrip thumbnails, adjustable zoom, and keyboard transport shortcuts (space, J/K/L, arrows). Clips chain by array order; the timeline is derived from it, not the other way around.
+**Editing** — multi-track timeline with drag reordering, snapping, trim, ripple delete, filmstrip thumbnails, adjustable zoom, and keyboard transport shortcuts (space, J/K/L, arrows). Clips chain by array order; the timeline is derived from it, not the other way around.
 
 **AI voiceover and analysis** — Gemini writes a narration script from your clip analyses, generates TTS audio, transcribes uploaded voiceovers, and suggests clip alignment. Auto-Align analyzes clips, orders the timeline, and back-fills caption segments.
 
-**Captions** — preview highlighting and export burn-in follow real word timings from transcription (with a character-count fallback when the model returns none). Style presets (Minimal, Bold Pop, Karaoke, Classic), a style editor, positioning presets, keyword emphasis, reusable templates, and SRT/VTT import and export.
+**Captions** — preview highlighting and export burn-in follow real word timings from transcription (with a character-count fallback when the model returns none). Style presets (Minimal, Bold Pop, Karaoke, Classic), reusable templates, and SRT/VTT import and export.
 
-**Publishing** — title variants, per-platform descriptions and hashtags (YouTube, Shorts, TikTok, Instagram), A/B thumbnail variants with a compare grid, YouTube-format chapters, a consolidated publish checklist, and aspect presets (9:16 / 16:9 / 1:1) with letterbox or smart-crop handling.
+**Publishing** — generated descriptions with chapters and hashtags, YouTube-format chapters as a separate download, key-moment thumbnail captures with quote overlays, and aspect presets (9:16 / 16:9 / 1:1) with letterbox or smart-crop handling in exports.
 
-**Export** — canvas + `MediaRecorder` pipeline with a real progress bar and cancel, quality presets, WebM/MP4 with codec fallback, background music, per-clip audio fades, peak normalization, and mixed-audio WAV download.
+**Export** — canvas + `MediaRecorder` pipeline with quality presets (with estimated output size), background music with volume control, and WebM/MP4 with codec fallback.
 
-**Projects** — save, autosave, and reload the full editor state (clips, voiceover, caption style, ordering) through the local server, or move it as a ZIP archive.
+**Projects** — save and reload the full editor state (clips, voiceover, caption style, ordering) through the local server, with a per-clip error banner when media can't be restored.
 
 ## Architecture
 
@@ -97,14 +97,13 @@ Saved projects serialize everything in the editor: clip metadata (order, tracks,
 
 ### MCP server
 
-A Model Context Protocol server (`server/mcp/`) lets an agent do everything the UI does to project data — without the UI — through fifteen tools grouped by capability:
+A Model Context Protocol server (`server/mcp/`) lets an agent read Syncro's saved projects and move media without the UI. Four tools are live today; the full guide documents more as their branches land:
 
-- **Projects** — list and inspect saved projects (full editor state and a timeline snapshot via `get_timeline`), create, update, and delete them.
-- **Media** — upload files and attach them to projects.
-- **Generation** — server-side Gemini for narration, TTS, captions, descriptions, and thumbnails; these tools need `GEMINI_API_KEY` in the MCP process's environment (read, media, and export tools need no key).
-- **Export** — `trigger_export` enqueues server-side export jobs (16:9 / 9:16 / 1:1 presets); poll the REST API for job status.
+- **Projects** — `list_projects` and `get_project` inspect saved projects, full editor state included.
+- **Media** — `upload_media` puts a file on the server; `attach_media` adds it to a project's timeline.
+- **Planned** — project mutation, server-side Gemini generation, and export-trigger tools are documented in [MCP.md](MCP.md) ahead of their branches landing.
 
-The server is a thin REST client of the projects API — it holds no database of its own — and points at a running Syncro server via `SYNCRO_API_URL` (default `http://localhost:3001`). Expected failures (unknown project id, API unreachable, missing key) surface as tool errors the calling agent can react to; they never crash the session. Two transports: **stdio** (default, `npm run mcp`) and **streamable HTTP** (`npm run mcp:http`, `127.0.0.1:3010`, `--port` or `SYNCRO_MCP_PORT`).
+The server is a thin REST client of the projects API — it holds no database of its own — and points at a running Syncro server via `SYNCRO_SERVER_URL` (default `http://localhost:3001`). Expected failures (unknown project id, API unreachable) surface as tool errors the calling agent can react to; they never crash the session. One transport today: **stdio**, launched as `npm run mcp:start`; streamable HTTP is planned.
 
 Full tool reference, launch instructions, and copy-paste Claude Desktop / generic agent configs (in [`docs/examples/`](docs/examples/)): **[MCP.md](MCP.md)**.
 
@@ -113,7 +112,6 @@ Full tool reference, launch instructions, and copy-paste Claude Desktop / generi
 Every Gemini call routes through one shared client module (`src/services/geminiClient.ts`), which is the single seam where logging, token capture, and cost accounting happen:
 
 - **Per-call accounting** — each call's `usageMetadata` (input/output tokens) is captured and priced from a per-model table; the LogPanel shows every operation's cost plus a running session total.
-- **Pre-run estimates** — the estimated cost of a TTS, transcription, or post-processing run is shown *before* it executes, derived from input size.
 - **Honest failures** — a failed call still logs its duration and tokens consumed, and distinguishes "cost nothing" from "billed".
 - **Model registry** — model ids are pinned once in `src/services/models.ts`; the registry notes why each id was chosen and is kept current against Gemini deprecations.
 
