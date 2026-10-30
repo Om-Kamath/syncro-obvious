@@ -63,7 +63,7 @@ function writeStore(projects: SavedProject[]): void {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(file));
   } catch (err) {
-    throw new Error(`Could not save project: ${err instanceof Error ? err.message : String(err)}`);
+    throw new Error('Could not save project: storage write failed.', { cause: err });
   }
 }
 
