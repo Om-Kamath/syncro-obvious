@@ -97,11 +97,11 @@ Saved projects serialize everything in the editor: clip metadata (order, tracks,
 
 ### MCP server
 
-A Model Context Protocol server (`server/mcp/`) lets an agent read Syncro's saved projects and move media without the UI. Four tools are live today; the full guide documents more as their branches land:
+A Model Context Protocol server (`server/mcp/`) lets an agent manage Syncro's saved projects and move media without the UI. Seven tools are live today:
 
-- **Projects** — `list_projects` and `get_project` inspect saved projects, full editor state included.
+- **Projects** — `list_projects`, `get_project`, `create_project`, `update_project`, and `delete_project` cover the full project lifecycle against the running server.
 - **Media** — `upload_media` puts a file on the server; `attach_media` adds it to a project's timeline.
-- **Planned** — project mutation, server-side Gemini generation, and export-trigger tools are documented in [MCP.md](MCP.md) ahead of their branches landing.
+- **Planned** — server-side Gemini generation and export-trigger tools are documented in [MCP.md](MCP.md) ahead of their branches landing.
 
 The server is a thin REST client of the projects API — it holds no database of its own — and points at a running Syncro server via `SYNCRO_SERVER_URL` (default `http://localhost:3001`). Expected failures (unknown project id, API unreachable) surface as tool errors the calling agent can react to; they never crash the session. One transport today: **stdio**, launched as `npm run mcp:start`; streamable HTTP is planned.
 
@@ -112,6 +112,7 @@ Full tool reference, launch instructions, and copy-paste Claude Desktop / generi
 Every Gemini call routes through one shared client module (`src/services/geminiClient.ts`), which is the single seam where logging, token capture, and cost accounting happen:
 
 - **Per-call accounting** — each call's `usageMetadata` (input/output tokens) is captured and priced from a per-model table; the LogPanel shows every operation's cost plus a running session total.
+- **Pre-run estimates** — badges next to the TTS, narration, description, and thumbnail actions show the estimated cost before the action runs, derived from input size.
 - **Honest failures** — a failed call still logs its duration and tokens consumed, and distinguishes "cost nothing" from "billed".
 - **Model registry** — model ids are pinned once in `src/services/models.ts`; the registry notes why each id was chosen and is kept current against Gemini deprecations.
 

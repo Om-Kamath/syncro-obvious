@@ -52,9 +52,9 @@ SYNCRO_MCP_PORT=4000 npm run mcp:http        # same, via env (planned — not on
 
 ## Tool reference
 
-Four tools are live on `main` today — `list_projects`, `get_project`, `upload_media`, and `attach_media` — and ten more are documented below from their open branches so this guide stays stable as they land. Every tool returns JSON, pretty-printed, as a single text content block. Expected failures — unknown project id, API unreachable, missing key — come back as tool errors (`isError: true`) with a human-readable message, so an agent can react to them; they never crash the session.
+Seven tools are live on `main` today — `list_projects`, `get_project`, `create_project`, `update_project`, `delete_project`, `upload_media`, and `attach_media` — and eight more are documented below from their open branches so this guide stays stable as they land. Every tool returns JSON, pretty-printed, as a single text content block. Expected failures — unknown project id, API unreachable, missing key — come back as tool errors (`isError: true`) with a human-readable message, so an agent can react to them; they never crash the session.
 
-Read tools (`list_projects`, `get_project`) and the media tools (`upload_media`, `attach_media`) are shipped. Mutation, generation, export, and the second read tool `get_timeline` arrive on their own branches (each listed with its branch name and marked "not on `main` yet"). They all register into the same server entrypoint, so the launch contract in the previous section holds regardless of which tool groups have landed.
+Read tools (`list_projects`, `get_project`), the project mutation tools (`create_project`, `update_project`, `delete_project`), and the media tools (`upload_media`, `attach_media`) are shipped. Generation, export, and the read tool `get_timeline` arrive on their own branches (each listed with its branch name and marked "not on `main` yet"). They all register into the same server entrypoint, so the launch contract in the previous section holds regardless of which tool groups have landed.
 
 ### Reading projects — `list_projects` and `get_project` shipped; `get_timeline` not on `main` yet
 
@@ -115,7 +115,7 @@ Enqueues a server-side export job for a saved project. Returns the new job id an
 
 Returns `{ "jobId": "…", "status": "queued" }`.
 
-### Mutating projects (`task/pr-31-mcp-project-mutation-tools`) — not on `main` yet
+### Mutating projects
 
 #### `create_project`
 
@@ -323,7 +323,7 @@ The configs in this guide were executed, not just written. Every launch form bel
 | `SYNCRO_MCP_PORT=4000 npm run mcp:http` | HTTP transport branch, `6d276f2` | Same handshake on port 4000 |
 | REST backing | projects API, `f99d14a` | Express on `:3001` with a seeded SQLite project; the MCP read tools returned exactly the seeded data |
 
-The mutation, media, generation, and publishing tool groups are documented from their branches' code and test suites (`server/mcp/*.test.ts` on each branch) rather than live-driven here — their contracts above come straight from the registered input schemas. Everything else in the table was executed end-to-end.
+The generation and publishing tool groups are documented from their branches' code and test suites (`server/mcp/*.test.ts` on each branch) rather than live-driven here — their contracts above come straight from the registered input schemas. Everything else in the table was executed end-to-end.
 
 The stdio servers read through `SYNCRO_SERVER_URL` (default `http://localhost:3001`); the HTTP-transport branch runs against an in-memory store until it is rebased onto the DB-backed REST API, which is why its `list_projects` call returned an empty array in the evidence above. If this guide and the code ever disagree, the launch surface is `package.json`'s `mcp*` scripts, tool registrations live in the modules under `server/mcp/` (`tools.ts`, `mcpServer.ts`, `mediaTools.ts`, `server.ts`, …), and env handling sits beside each entrypoint (`api.ts` on the scaffold, `gemini.ts` on the publishing branch) — fix the docs against those, or the code against this guide.
 
