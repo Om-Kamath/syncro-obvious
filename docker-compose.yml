@@ -1,0 +1,20 @@
+services:
+  app:
+    build: .
+    image: syncro-app:local
+    ports:
+      - "3001:3001"
+    environment:
+      # Express API port inside the container (matches EXPOSE in the Dockerfile).
+      PORT: 3001
+      # SQLite database + media will live here once the saved-projects
+      # persistence lands; the directory is volume-backed so data survives
+      # container rebuilds.
+      SYNCRO_DATA_DIR: /app/data
+    volumes:
+      # Named volume persists the SQLite data across container upgrades.
+      - syncro-data:/app/data
+    restart: unless-stopped
+
+volumes:
+  syncro-data:
