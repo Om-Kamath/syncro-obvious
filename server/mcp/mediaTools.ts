@@ -12,6 +12,8 @@ import {
 } from './apiClient';
 import { registerProjectTools } from './projectTools';
 import { ToolFailure, errorResult, jsonResult, toErrorResult } from './results';
+import { createGenerate, type GenerateFn } from './gemini';
+import { registerPublishingTools } from './publishingTools';
 
 export const DEFAULT_MAX_UPLOAD_BYTES = 100 * 1024 * 1024;
 
@@ -58,11 +60,18 @@ function timelineEnd(clips: SerializedClip[]): number {
 export interface SyncroMcpOptions {
   apiClient: SyncroApiClient;
   maxUploadBytes: number;
+  /**
+   * Injected Gemini transport for tests of the publishing tools. When omitted,
+   * the real server-side client is built lazily on first generation call, so a
+   * media-only deployment runs without GEMINI_API_KEY configured.
+   */
+  generate?: GenerateFn;
 }
 
 /**
  * Build the Syncro MCP server: read-only project tools (list_projects,
- * get_project) plus the media tools (upload_media, attach_media).
+ * get_project), the media tools (upload_media, attach_media), and the
+ * publishing tools (generate_description, generate_thumbnails, export_captions).
  *
  * Tests drive it through an in-memory client, so no stdio or HTTP listener
  * is involved.
@@ -74,8 +83,8 @@ export function createSyncroMcpServer(options: SyncroMcpOptions): McpServer {
     { name: 'syncro-mcp', version: '0.1.0' },
     {
       instructions:
-        'Tools for driving the Syncro video editor: list and read saved projects, create, update, or delete saved projects, upload media to the Syncro server, and attach uploaded media to saved projects as timeline clips or the voiceover. ' +
-        'Requires the Syncro server to be running (default http://localhost:3001).',
+        'Tools for driving the Syncro video editor: list and read saved projects, create, update, or delete saved projects, upload media to the Syncro server, and attach uploaded media to saved projects as timeline clips or the voiceover; generate publishing assets (description, thumbnail key moments) and serialize captions to SRT/VTT server-side. ' +
+        'Requires the Syncro server to be running (default http://localhost:3001); the publishing generation tools additionally need GEMINI_API_KEY in the MCP server environment.',
     },
   );
 
@@ -182,6 +191,11 @@ export function createSyncroMcpServer(options: SyncroMcpOptions): McpServer {
   );
 
   registerProjectTools(server, apiClient);
+
+  // Publishing tools (PR 34) share this server; the Gemini client is built
+  // lazily on first use so a read/media-only deployment needs no GEMINI_API_KEY.
+  let generate: GenerateFn | null = options.generate ?? null;
+  registerPublishingTools(server, { generate: () => (generate ??= createGenerate()) });
 
   return server;
 }
