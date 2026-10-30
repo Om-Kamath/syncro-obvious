@@ -50,4 +50,19 @@ describe('LruCache', () => {
   it('rejects a maxEntries below 1', () => {
     expect(() => new LruCache<string, number>(0)).toThrow();
   });
+
+  it('delete drops a key so it misses and can be re-inserted', () => {
+    const cache = new LruCache<string, number>(2);
+    cache.set('a', 1);
+    cache.delete('a');
+    expect(cache.has('a')).toBe(false);
+    expect(cache.get('a')).toBeUndefined();
+    cache.set('a', 2);
+    expect(cache.get('a')).toBe(2);
+  });
+
+  it('delete is a no-op for absent keys', () => {
+    const cache = new LruCache<string, number>(2);
+    expect(() => cache.delete('missing')).not.toThrow();
+  });
 });

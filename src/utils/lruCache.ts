@@ -38,4 +38,9 @@ export class LruCache<K, V> {
   has(key: K): boolean {
     return this.entries.has(key);
   }
+
+  /** Drops a key entirely — used for explicit invalidation. No-op when absent. */
+  delete(key: K): void {
+    this.entries.delete(key);
+  }
 }

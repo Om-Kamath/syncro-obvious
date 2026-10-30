@@ -9,6 +9,7 @@ import { selectionReducer, initialSelection, clipIdsInRect, type SelectionAction
 import { collectSnapCandidates, findSnap } from '../utils/timelineSnap';
 import { estimateAlignmentFlowCost } from '../services/costEstimate';
 import { CostEstimateBadge } from './CostEstimateBadge';
+import { getWaveformPeaks, peaksResolutionFor, voiceoverAssetId } from '../services/waveformPeaks';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 
@@ -136,6 +137,9 @@ export const Timeline: React.FC<TimelineProps> = ({
   useEffect(() => { selectionRef.current = selection; }, [selection]);
 
   const [pixelsPerSecond, setPixelsPerSecond] = useState<number>(DEFAULT_PPS);
+  // Cached zoom tier for waveform peaks — stable across small zoom steps so
+  // the waveform only remounts when the tier itself changes.
+  const peaksResolution = peaksResolutionFor(pixelsPerSecond);
   const TRACK_PADDING = TRACK_LABEL_W + 8; // label width + gap-2 (8px) = where lane content starts
 
   const voiceoverEffectiveDuration = voiceover
@@ -205,19 +209,41 @@ export const Timeline: React.FC<TimelineProps> = ({
     collectSnapCandidates(videoClipsRef.current, currentTimeRef.current, excludeId);
 
   useEffect(() => {
-    if (waveformRef.current && voiceover) {
-      wavesurfer.current = WaveSurfer.create({
+    if (!waveformRef.current || !voiceover) return;
+    let cancelled = false;
+    let ws: WaveSurfer | null = null;
+
+    // Serve waveform peaks from the cache (each asset is decoded at most
+    // once, at one resolution per zoom tier) so remounts — every drag
+    // frame, trim, or segment update produces a new voiceover object —
+    // never re-decode the audio. On any cache or decode failure, fall
+    // back to WaveSurfer's own fetching and decoding.
+    void (async () => {
+      let peaks: Float32Array[] | undefined;
+      try {
+        // Ternary, not `??`: under strict mode the inline `?? await` form
+        // infers `Blob | undefined`, which the peaks API rejects.
+        const blob = voiceover.file ? voiceover.file : await fetch(voiceover.url).then(res => res.blob());
+        peaks = await getWaveformPeaks(voiceoverAssetId(voiceover), blob, peaksResolution);
+      } catch (err) {
+        console.warn('Waveform peaks unavailable; WaveSurfer will decode the audio itself', err);
+      }
+      if (cancelled || !waveformRef.current) return;
+      ws = WaveSurfer.create({
         container: waveformRef.current,
         waveColor: '#8b5cf6', progressColor: '#a78bfa', cursorColor: '#ffffff',
         barWidth: 2, barRadius: 3, height: 80, interact: false, url: voiceover.url,
+        ...(peaks ? { peaks, duration: voiceover.duration } : {}),
       });
-      wavesurfer.current.on('ready', () => {
+      wavesurfer.current = ws;
+      ws.on('ready', () => {
         const trimStart = voiceover.trimStart ?? 0;
         if (trimStart > 0) wavesurfer.current?.seekTo(trimStart / voiceover.duration);
       });
-      return () => { wavesurfer.current?.destroy(); wavesurfer.current = null; };
-    }
-  }, [voiceover]);
+    })();
+
+    return () => { cancelled = true; ws?.destroy(); wavesurfer.current = null; };
+  }, [voiceover, peaksResolution]);
 
   useEffect(() => {
     if (!isPlaying) { if (wavesurfer.current?.isPlaying()) wavesurfer.current.pause(); return; }
