@@ -39,6 +39,9 @@ import {
   Activity,
   Key,
   FolderOpen,
+  Plus,
+  Check,
+  X,
 } from 'lucide-react';
 import { setApiKey, hasApiKey } from './services/apiKey';
 import { chainClips, rippleDeleteMany } from './utils/chainClips';
@@ -695,8 +698,8 @@ export default function App() {
                 <FolderOpen className="w-3.5 h-3.5" /> Projects
               </button>
               <button onClick={() => setOnboardingStep(1)}
-                className="px-4 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-600 text-xs font-semibold rounded-full transition-colors">
-                + New Project
+                className="flex items-center gap-1 px-4 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-600 text-xs font-semibold rounded-full transition-colors">
+                <Plus className="w-3 h-3" /> New Project
               </button>
             </>
           )}
@@ -798,9 +801,7 @@ export default function App() {
                         {clip.analysis && (
                           <div className="flex items-center gap-1 mt-1">
                             <div className="w-3 h-3 rounded-full bg-emerald-500 flex items-center justify-center">
-                              <svg className="w-2 h-2 text-white" viewBox="0 0 10 10" fill="none">
-                                <path d="M2 5l2 2 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-                              </svg>
+                              <Check className="w-2 h-2 text-white" />
                             </div>
                             <span className="text-[10px] font-medium text-emerald-600">Analyzed</span>
                           </div>
@@ -950,8 +951,8 @@ export default function App() {
                   <Layers className="w-4 h-4 text-violet-600" />
                   <span className="text-sm font-bold text-gray-900">Export &amp; Post-Processing</span>
                 </div>
-                <button onClick={() => setShowExportModal(false)} className="w-7 h-7 flex items-center justify-center rounded-full bg-gray-100 hover:bg-gray-200 text-gray-500 hover:text-gray-700 transition-colors text-sm font-bold">
-                  ✕
+                <button onClick={() => setShowExportModal(false)} aria-label="Close export panel" className="w-7 h-7 flex items-center justify-center rounded-full bg-gray-100 hover:bg-gray-200 text-gray-500 hover:text-gray-700 transition-colors">
+                  <X className="w-4 h-4" />
                 </button>
               </div>
               <div className="p-5">
