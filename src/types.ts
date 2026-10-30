@@ -52,12 +52,15 @@ export interface VideoDescription {
 
 export type CaptionMode = 'lower-third' | 'word-highlight' | 'speaker-labeled';
 
+export type CaptionPresetName = 'minimal' | 'bold-pop' | 'karaoke' | 'classic';
+
 export interface CaptionStyle {
   mode: CaptionMode;
   fontSize: number;
   color: string;
   bgColor: string;
   position: 'bottom' | 'top';
+  preset?: CaptionPresetName; // named look this style came from; manual edits clear it
 }
 
 export interface ThumbnailCandidate {

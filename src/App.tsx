@@ -36,6 +36,7 @@ import {
 } from 'lucide-react';
 import { setApiKey, hasApiKey } from './services/apiKey';
 import { chainClips } from './utils/chainClips';
+import { DEFAULT_CAPTION_STYLE } from './utils/captionPresets';
 import { motion, AnimatePresence } from 'motion/react';
 
 // Heavy Gemini export UI — code-split so it lands in its own chunk and is
@@ -226,9 +227,7 @@ export default function App() {
   const [editingClipId, setEditingClipId] = useState<string | null>(null);
   const [showVoiceoverEditor, setShowVoiceoverEditor] = useState(false);
   const [captionsEnabled, setCaptionsEnabled] = useState(false);
-  const [captionStyle, setCaptionStyle] = useState<CaptionStyle>({
-    mode: 'lower-third', fontSize: 16, color: '#ffffff', bgColor: '#000000', position: 'bottom',
-  });
+  const [captionStyle, setCaptionStyle] = useState<CaptionStyle>(DEFAULT_CAPTION_STYLE);
   const [onboardingStep, setOnboardingStep] = useState<1 | 2 | null>(1);
   const [showExportModal, setShowExportModal] = useState(false);
   const [showLogs, setShowLogs] = useState(false);

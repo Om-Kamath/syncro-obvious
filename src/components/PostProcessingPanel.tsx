@@ -22,6 +22,7 @@ import {
 import { VideoClip, Voiceover, CaptionStyle, CaptionMode, VideoDescription, ThumbnailCandidate } from '../types';
 import { generateDescription, identifyKeyMoments } from '../services/postProcessing';
 import { generateSRT, generateVTT, downloadTextFile } from '../utils/captionUtils';
+import { CAPTION_PRESETS, CAPTION_PRESET_ORDER, applyPreset } from '../utils/captionPresets';
 import { captureVideoFrame, addQuoteOverlay, downloadDataUrl, downloadFile, getClipAtTime } from '../utils/exportUtils';
 import { EXPORT_PRESETS, DEFAULT_EXPORT_PRESET, computeDrawGeometry, type ExportPresetId } from '../utils/exportPresets';
 
@@ -286,7 +287,7 @@ function DescriptionTab({ voiceover, videoClips }: { voiceover: Voiceover; video
 // ═══════════════════════════════════════════════════════════════════════════
 // TAB 2 — Captions
 // ═══════════════════════════════════════════════════════════════════════════
-function CaptionsTab({
+export function CaptionsTab({
   voiceover,
   captionStyle,
   captionsEnabled,
@@ -301,8 +302,12 @@ function CaptionsTab({
 }) {
   const hasSegments = !!voiceover?.segments?.length;
 
-  const handleMode = (mode: CaptionMode) => onStyleChange({ ...captionStyle, mode });
-  const handlePosition = (position: 'bottom' | 'top') => onStyleChange({ ...captionStyle, position });
+  // Manual tweaks take the style off its named preset, so the picker stops
+  // highlighting it instead of lying about the active look.
+  const updateStyle = (patch: Partial<CaptionStyle>) =>
+    onStyleChange({ ...captionStyle, ...patch, preset: undefined });
+  const handleMode = (mode: CaptionMode) => updateStyle({ mode });
+  const handlePosition = (position: 'bottom' | 'top') => updateStyle({ position });
 
   const modeOptions: { value: CaptionMode; label: string; desc: string }[] = [
     { value: 'lower-third', label: 'Lower Third', desc: 'Classic bar at bottom' },
@@ -350,6 +355,39 @@ function CaptionsTab({
         </button>
       </div>
 
+      {/* Presets */}
+      <div className="space-y-3">
+        <p className="text-xs font-bold uppercase tracking-widest text-gray-400">Presets</p>
+        <div className="grid grid-cols-2 gap-3">
+          {CAPTION_PRESET_ORDER.map(name => {
+            const preset = CAPTION_PRESETS[name];
+            const active = captionStyle.preset === name;
+            return (
+              <button
+                key={name}
+                onClick={() => onStyleChange(applyPreset(name))}
+                aria-pressed={active}
+                className={cn(
+                  'flex items-center gap-3 p-3 rounded-xl border text-left transition-all',
+                  active ? 'border-violet-500 bg-violet-50 ring-1 ring-violet-300' : 'border-gray-200 hover:border-gray-300 bg-gray-50'
+                )}
+              >
+                <span
+                  className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg border border-black/10 text-[11px] font-bold"
+                  style={{ backgroundColor: preset.style.bgColor, color: preset.style.color }}
+                >
+                  Aa
+                </span>
+                <span>
+                  <span className="block text-xs font-semibold text-gray-900">{preset.label}</span>
+                  <span className="block text-[10px] text-gray-400 mt-0.5">{preset.description}</span>
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
       {/* Caption style */}
       <div className="space-y-3">
         <p className="text-xs font-bold uppercase tracking-widest text-gray-400">Style</p>
@@ -383,7 +421,7 @@ function CaptionsTab({
           min={12}
           max={36}
           value={captionStyle.fontSize}
-          onChange={e => onStyleChange({ ...captionStyle, fontSize: Number(e.target.value) })}
+          onChange={e => updateStyle({ fontSize: Number(e.target.value) })}
           className="w-full h-1.5 bg-gray-200 rounded-full appearance-none cursor-pointer accent-violet-600"
         />
       </div>
@@ -396,7 +434,7 @@ function CaptionsTab({
             <input
               type="color"
               value={captionStyle.color}
-              onChange={e => onStyleChange({ ...captionStyle, color: e.target.value })}
+              onChange={e => updateStyle({ color: e.target.value })}
               className="w-8 h-8 rounded-lg border-0 cursor-pointer bg-transparent"
             />
             <span className="text-xs font-mono text-gray-500">{captionStyle.color}</span>
@@ -408,7 +446,7 @@ function CaptionsTab({
             <input
               type="color"
               value={captionStyle.bgColor}
-              onChange={e => onStyleChange({ ...captionStyle, bgColor: e.target.value })}
+              onChange={e => updateStyle({ bgColor: e.target.value })}
               className="w-8 h-8 rounded-lg border-0 cursor-pointer bg-transparent"
             />
             <span className="text-xs font-mono text-gray-500">{captionStyle.bgColor}</span>
