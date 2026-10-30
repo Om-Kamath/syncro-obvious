@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { VideoClip } from '../types';
+import { frameDuration, snapToFrame } from '../utils/trimMath';
 import { X, Scissors, Type, RotateCcw } from 'lucide-react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -25,6 +26,11 @@ export const ClipEditor: React.FC<ClipEditorProps> = ({ clip, onSave, onClose })
     );
     const [textOverlay, setTextOverlay] = useState(clip.textOverlay ?? '');
 
+    // Frame grid from the source video — sliders step (and save) on frame
+    // boundaries so modal edits agree with the timeline's trim handles.
+    const fps = clip.fps;
+    const frameStep = frameDuration(fps);
+
     const videoRef = useRef<HTMLVideoElement>(null);
     const overlayRef = useRef<HTMLDivElement>(null);
 
@@ -47,12 +53,14 @@ export const ClipEditor: React.FC<ClipEditorProps> = ({ clip, onSave, onClose })
     }, [onClose]);
 
     const handleSave = () => {
-        const newEffectiveDuration = trimEnd - trimStart;
+        const snappedStart = Math.max(0, snapToFrame(trimStart, fps));
+        const snappedEnd = Math.max(snappedStart + frameStep, Math.min(snapToFrame(trimEnd, fps), clip.duration));
+        const newEffectiveDuration = snappedEnd - snappedStart;
         // Only set trimmedDuration if it's different from the full duration
-        const hasRightTrim = trimEnd < clip.duration || trimStart > 0;
+        const hasRightTrim = snappedEnd < clip.duration || snappedStart > 0;
         onSave({
             ...clip,
-            trimStart: trimStart > 0 ? trimStart : undefined,
+            trimStart: snappedStart > 0 ? snappedStart : undefined,
             trimmedDuration: hasRightTrim ? newEffectiveDuration : undefined,
             textOverlay: textOverlay.trim() || undefined,
         });
@@ -147,9 +155,9 @@ export const ClipEditor: React.FC<ClipEditorProps> = ({ clip, onSave, onClose })
                                         type="range"
                                         min={0}
                                         max={clip.duration}
-                                        step={0.1}
+                                        step={frameStep}
                                         value={trimStart}
-                                        onChange={e => setTrimStart(clampTrimStart(Number(e.target.value)))}
+                                        onChange={e => setTrimStart(clampTrimStart(snapToFrame(Number(e.target.value), fps)))}
                                         className="flex-1 accent-emerald-500"
                                     />
                                     <span className="text-[11px] font-mono text-zinc-600 w-12 text-right">{formatTime(trimStart)}</span>
@@ -162,9 +170,9 @@ export const ClipEditor: React.FC<ClipEditorProps> = ({ clip, onSave, onClose })
                                         type="range"
                                         min={0}
                                         max={clip.duration}
-                                        step={0.1}
+                                        step={frameStep}
                                         value={trimEnd}
-                                        onChange={e => setTrimEnd(clampTrimEnd(Number(e.target.value)))}
+                                        onChange={e => setTrimEnd(clampTrimEnd(snapToFrame(Number(e.target.value), fps)))}
                                         className="flex-1 accent-orange-500"
                                     />
                                     <span className="text-[11px] font-mono text-zinc-600 w-12 text-right">{formatTime(trimEnd)}</span>

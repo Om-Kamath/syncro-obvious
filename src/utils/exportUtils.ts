@@ -1,4 +1,5 @@
 import { VideoClip } from '../types';
+import { effectiveDuration } from './trimMath';
 
 /** Extract a frame from a video file at the given local timestamp. Returns a JPEG data URL. */
 export function captureVideoFrame(clip: VideoClip, localTime: number): Promise<string> {
@@ -134,7 +135,7 @@ export function downloadFile(blob: Blob, filename: string): void {
   setTimeout(() => URL.revokeObjectURL(url), 30_000);
 }
 
-/** Determine which clip (and its local time) is active at a given global timeline time. */
+/** Determine which clip (and its source-local time) is active at a given global timeline time. */
 export function getClipAtTime(
   clips: VideoClip[],
   time: number
@@ -145,16 +146,21 @@ export function getClipAtTime(
     .sort((a, b) => a.startTime - b.startTime);
   if (sorted.length === 0) return null;
 
-  const covering = sorted.find(c => time >= c.startTime && time < c.startTime + c.duration);
-  if (covering) return { clip: covering, localTime: time - covering.startTime };
+  // Extent and local time must honor trims so exported video and thumbnail
+  // captures show the frames the editor preview shows.
+  const covering = sorted.find(c => time >= c.startTime && time < c.startTime + effectiveDuration(c));
+  if (covering) {
+    return { clip: covering, localTime: (time - covering.startTime) + (covering.trimStart ?? 0) };
+  }
 
-  const total = sorted.reduce((s, c) => s + c.duration, 0);
+  const total = sorted.reduce((s, c) => s + effectiveDuration(c), 0);
   if (total <= 0) return null;
   const looped = time % total;
   let acc = 0;
   for (const c of sorted) {
-    if (looped >= acc && looped < acc + c.duration) return { clip: c, localTime: looped - acc };
-    acc += c.duration;
+    const eff = effectiveDuration(c);
+    if (looped >= acc && looped < acc + eff) return { clip: c, localTime: (looped - acc) + (c.trimStart ?? 0) };
+    acc += eff;
   }
   return null;
 }
