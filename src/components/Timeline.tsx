@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState, useCallback, useReducer } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState, useCallback, useReducer } from 'react';
 import WaveSurfer from 'wavesurfer.js';
 import { VideoClip, Voiceover, TransitionType } from '../types';
 import { ClipWaveform } from './ClipWaveform';
@@ -9,6 +9,7 @@ import { selectionReducer, initialSelection, clipIdsInRect, type SelectionAction
 import { collectSnapCandidates, findSnap } from '../utils/timelineSnap';
 import { estimateAlignmentFlowCost } from '../services/costEstimate';
 import { CostEstimateBadge } from './CostEstimateBadge';
+import { getVisibleTimeWindow, sliceVisibleClips, visibleTickRange } from '../utils/timelineVirtualization';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 
@@ -137,6 +138,29 @@ export const Timeline: React.FC<TimelineProps> = ({
 
   const [pixelsPerSecond, setPixelsPerSecond] = useState<number>(DEFAULT_PPS);
   const TRACK_PADDING = TRACK_LABEL_W + 8; // label width + gap-2 (8px) = where lane content starts
+
+  // Virtualization viewport: the visible px span of the scroll area. Stored in
+  // px (not seconds) so zoom changes re-derive the time window without extra
+  // listeners — clamping fires a scroll event for us.
+  const [scrollViewport, setScrollViewport] = useState({ scrollLeft: 0, width: 0 });
+  useLayoutEffect(() => {
+    const el = trackAreaRef.current;
+    if (!el) return;
+    const update = () => setScrollViewport({ scrollLeft: el.scrollLeft, width: el.clientWidth });
+    update();
+    el.addEventListener('scroll', update, { passive: true });
+    // ResizeObserver is unavailable in some environments (e.g. jsdom); width
+    // refresh beyond the initial read is a progressive enhancement.
+    if (typeof ResizeObserver === 'undefined') {
+      return () => { el.removeEventListener('scroll', update); };
+    }
+    const observer = new ResizeObserver(update);
+    observer.observe(el);
+    return () => {
+      el.removeEventListener('scroll', update);
+      observer.disconnect();
+    };
+  }, []);
 
   const voiceoverEffectiveDuration = voiceover
     ? (voiceover.trimEnd ?? voiceover.duration) - (voiceover.trimStart ?? 0)
@@ -491,6 +515,28 @@ export const Timeline: React.FC<TimelineProps> = ({
   // Split is only offered strictly inside a clip — at a boundary it would be a no-op.
   const clipAtPlayhead = findClipAtPlayhead(videoClips, currentTime);
   const canSplitAtPlayhead = !!clipAtPlayhead && currentTime > clipAtPlayhead.startTime;
+  // Windowed rendering: only clips intersecting the scroll viewport render.
+  const visibleWindow = getVisibleTimeWindow(
+    scrollViewport.scrollLeft,
+    scrollViewport.width,
+    pixelsPerSecond,
+    TRACK_PADDING,
+  );
+  const visibleClips = sliceVisibleClips(
+    sortedClips,
+    visibleWindow,
+    c => c.startTime,
+    c => c.trimmedDuration ?? c.duration,
+  );
+  // Clips in an active gesture or an open popover stay mounted even when the
+  // viewport scrolls away mid-interaction. The whole multi-selection stays
+  // mounted so a group drag survives scrolling (multi-select state).
+  const pinnedIds: Array<string | null | undefined> = [
+    draggingClipId, draggingTrimId, transitionPopoverId, altPopover?.clipId, ...selection.ids,
+  ];
+  const visibleIds = new Set<string>(pinnedIds.filter((id): id is string => typeof id === 'string'));
+  for (const clip of visibleClips) visibleIds.add(clip.id);
+  const rulerTicks = visibleTickRange(visibleWindow);
 
   // Pre-run estimate for the whole Auto-Align flow: transcription (when the
   // uploaded voiceover hasn't been transcribed yet) + un-analyzed clip
@@ -622,6 +668,7 @@ export const Timeline: React.FC<TimelineProps> = ({
       {/* Scrollable track area */}
       <div
         ref={trackAreaRef}
+        data-testid="timeline-scroll-area"
         className={cn('relative overflow-x-auto bg-gray-50', isDraggingPlayhead && 'cursor-ew-resize select-none')}
         style={{ minHeight: `${28 + 16 + 80 + 16 + numTracks * TRACK_ROW_H + 16}px` }}
         onClick={handleTrackClick}
@@ -630,7 +677,7 @@ export const Timeline: React.FC<TimelineProps> = ({
 
           {/* Time Ruler */}
           <div aria-hidden="true" style={{ marginLeft: TRACK_PADDING, height: 28, borderBottom: '1px solid #e5e7eb', position: 'relative' }} className="pointer-events-none">
-            {Array.from({ length: Math.ceil(totalDuration) + 5 }).map((_, i) => (
+            {Array.from({ length: rulerTicks.to - rulerTicks.from + 1 }, (_, offset) => rulerTicks.from + offset).map((i) => (
               <div key={i} className="absolute bottom-0 flex flex-col items-start" style={{ left: `${i * pixelsPerSecond}px` }}>
                 <span className="text-[10px] text-gray-400 font-mono" style={{ position: 'absolute', top: 2, left: 3 }}>{i}s</span>
                 <div className="w-px bg-gray-300" style={{ height: 6 }} />
@@ -697,7 +744,8 @@ export const Timeline: React.FC<TimelineProps> = ({
             {/* Video track rows */}
             <div ref={videoTracksContainerRef} onMouseDown={handleTracksMouseDown} className={cn('relative space-y-4', marquee && 'cursor-crosshair select-none')}>
               {Array.from({ length: numTracks }).map((_, trackIdx) => {
-                const trackClips = sortedClips.filter(c => (c.track ?? 0) === trackIdx);
+                const trackClipsAll = sortedClips.filter(c => (c.track ?? 0) === trackIdx);
+                const trackClips = trackClipsAll.filter(c => visibleIds.has(c.id));
                 return (
                   <div key={trackIdx} className="flex items-center gap-2">
                     {/* Track label */}
@@ -863,7 +911,7 @@ export const Timeline: React.FC<TimelineProps> = ({
 
                             {/* Transition badge between adjacent clips */}
                             {(() => {
-                              const nextOnTrack = trackClips.find(c2 => c2.id !== clip.id && Math.abs(c2.startTime - (clip.startTime + effectiveDuration)) < 0.5);
+                              const nextOnTrack = trackClipsAll.find(c2 => c2.id !== clip.id && Math.abs(c2.startTime - (clip.startTime + effectiveDuration)) < 0.5);
                               if (!nextOnTrack) return null;
                               const transitionType = nextOnTrack.transitionIn ?? 'cut';
                               const x = (clip.startTime + effectiveDuration) * pixelsPerSecond;
