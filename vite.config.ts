@@ -14,5 +14,12 @@ export default defineConfig({
     // HMR is disabled in AI Studio via DISABLE_HMR env var.
     // Do not modify — file watching is disabled to prevent flickering during agent edits.
     hmr: process.env.DISABLE_HMR !== 'true',
+    // Project media (blob uploads/restores) is served by the Express server.
+    proxy: {
+      '/api/media': {
+        target: 'http://localhost:3001',
+        changeOrigin: true,
+      },
+    },
   },
 });

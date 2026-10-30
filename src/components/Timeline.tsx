@@ -2,11 +2,13 @@ import React, { useEffect, useRef, useState, useCallback, useReducer } from 'rea
 import WaveSurfer from 'wavesurfer.js';
 import { VideoClip, Voiceover, TransitionType } from '../types';
 import { ClipWaveform } from './ClipWaveform';
-import { Play, Pause, Scissors, Wand2, Video, Plus, Minus, Maximize2, Zap, Layers, Star, Trash2, Keyboard } from 'lucide-react';
+import { Play, Pause, Scissors, Wand2, Video, Plus, Minus, Maximize2, Zap, Layers, Star, Trash2, AlertTriangle, Keyboard } from 'lucide-react';
 import { DEFAULT_PPS, fitPixelsPerSecond, stepPixelsPerSecond } from '../utils/timelineZoom';
 import { findClipAtPlayhead, splitClipsAtPlayhead } from '../utils/clipSplit';
 import { selectionReducer, initialSelection, clipIdsInRect, type SelectionAction } from '../utils/selectionReducer';
 import { collectSnapCandidates, findSnap } from '../utils/timelineSnap';
+import { estimateAlignmentFlowCost } from '../services/costEstimate';
+import { CostEstimateBadge } from './CostEstimateBadge';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 
@@ -490,6 +492,18 @@ export const Timeline: React.FC<TimelineProps> = ({
   const clipAtPlayhead = findClipAtPlayhead(videoClips, currentTime);
   const canSplitAtPlayhead = !!clipAtPlayhead && currentTime > clipAtPlayhead.startTime;
 
+  // Pre-run estimate for the whole Auto-Align flow: transcription (when the
+  // uploaded voiceover hasn't been transcribed yet) + un-analyzed clip
+  // analysis + alignment.
+  const alignmentEstimate = voiceover && videoClips.length > 0
+    ? estimateAlignmentFlowCost({
+        transcriptionDurationSec: voiceover.file && !voiceover.transcription ? voiceover.duration : 0,
+        transcriptionChars: voiceover.transcription?.length ?? 0,
+        unanalyzedClipDurationsSec: videoClips.filter(c => !c.analysis).map(c => c.duration),
+        analysisChars: videoClips.reduce((s, c) => s + (c.analysis?.length ?? 0), 0),
+      })
+    : null;
+
   return (
     <div className="bg-white border border-gray-200 rounded-2xl overflow-hidden shadow-sm">
       {/* Header */}
@@ -593,6 +607,7 @@ export const Timeline: React.FC<TimelineProps> = ({
               </>
             )}
           </div>
+          {alignmentEstimate && <CostEstimateBadge estimate={alignmentEstimate} />}
           <button
             onClick={onAutoAlign}
             disabled={isAligning || !voiceover || videoClips.length === 0}
@@ -707,7 +722,7 @@ export const Timeline: React.FC<TimelineProps> = ({
                               data-clip="true"
                               role="button"
                               tabIndex={0}
-                              aria-label={`Clip: ${clip.name}, ${effectiveDuration.toFixed(1)} seconds`}
+                              aria-label={`Clip: ${clip.name}, ${effectiveDuration.toFixed(1)} seconds${clip.mediaMissing ? ', media missing' : ''}`}
                               aria-pressed={selection.ids.has(clip.id)}
                               onMouseDown={(e) => handleClipMouseDown(e, clip)}
                               onKeyDown={(e) => {
@@ -779,6 +794,12 @@ export const Timeline: React.FC<TimelineProps> = ({
                                 <div className="relative z-10 flex items-center gap-1 mt-0.5">
                                   <Scissors className="w-3 h-3 text-orange-400 shrink-0" />
                                   <span className="text-[10px] text-orange-400 font-medium">{effectiveDuration.toFixed(1)}s</span>
+                                </div>
+                              )}
+                              {clip.mediaMissing && (
+                                <div className="flex items-center gap-1 mt-0.5" title="Saved media is unavailable for this clip — re-add the video file to restore playback">
+                                  <AlertTriangle className="w-3 h-3 text-red-400 shrink-0" />
+                                  <span className="text-[10px] text-red-400 font-medium">Media missing</span>
                                 </div>
                               )}
                               {clip.analysis && clip.trimmedDuration === undefined && clip.trimStart === undefined && (

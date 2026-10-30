@@ -28,9 +28,13 @@ import { VideoClip, Voiceover, CaptionStyle, CaptionMode, VideoDescription, Thum
 // synchronously (chapter/thumbnail timestamps) — same trade as exportPresets below.
 import { normalizeErrorMessage } from '../services/geminiClient';
 import { generateSRT, generateVTT, downloadTextFile, generateChaptersTxt, formatChapterTime, type CaptionSegment } from '../utils/captionUtils';
+import { CAPTION_PRESETS, CAPTION_PRESET_ORDER, applyPreset } from '../utils/captionPresets';
 import { listTemplates, saveTemplate, deleteTemplate, applyTemplate, loadTemplatesResult } from '../services/captionTemplates';
 import { parseCaptionFile, segmentsToTranscription } from '../utils/captionImport';
 import type { CaptionTemplate } from '../types';
+import { estimateDescriptionCost, estimateKeyMomentsCost } from '../services/costEstimate';
+import type { PostProcessingInput } from '../services/costEstimate';
+import { CostEstimateBadge } from './CostEstimateBadge';
 import { EXPORT_PRESETS, DEFAULT_EXPORT_PRESET, computeDrawGeometry, type ExportPresetId } from '../utils/exportPresets';
 import { audioChannelsOf, mixAudio, sliceAudioWindow, toAudioBuffer } from '../utils/audioMix';
 import { MusicPanel, DEFAULT_MUSIC_VOLUME } from './MusicPanel';
@@ -56,6 +60,15 @@ import {
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
+}
+
+/** Shared input-size mapping for the post-processing cost estimators. */
+function postProcessingEstimateInput(voiceover: Voiceover, videoClips: VideoClip[]): PostProcessingInput {
+  return {
+    transcriptionChars: voiceover.transcription?.length ?? 0,
+    segmentChars: voiceover.segments?.reduce((s, seg) => s + seg.text.length, 0) ?? 0,
+    analysisChars: videoClips.reduce((s, c) => s + (c.analysis?.length ?? 0), 0),
+  };
 }
 
 // ── Tab button ──────────────────────────────────────────────────────────────
@@ -200,25 +213,28 @@ export function DescriptionTab({ voiceover, videoClips }: { voiceover: Voiceover
           <p className="text-sm font-semibold text-gray-900">YouTube-Style Description</p>
           <p className="text-xs text-gray-400 mt-0.5">Auto-generated summary + chapter timestamps</p>
         </div>
-        <button
-          onClick={handleGenerate}
-          disabled={isGenerating}
-          className={cn(
-            'flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-xl transition-all',
-            isGenerating
-              ? 'bg-gray-100 text-gray-400 cursor-wait'
-              : 'bg-violet-600 text-white hover:bg-violet-700 shadow-sm shadow-violet-200'
-          )}
-        >
-          {isGenerating ? (
-            <Loader2 className="w-4 h-4 animate-spin" />
-          ) : description ? (
-            <RefreshCw className="w-4 h-4" />
-          ) : (
-            <Wand2 className="w-4 h-4" />
-          )}
-          {isGenerating ? 'Generating…' : description ? 'Regenerate' : 'Generate'}
-        </button>
+        <div className="flex items-center gap-3">
+          <CostEstimateBadge estimate={estimateDescriptionCost(postProcessingEstimateInput(voiceover, videoClips))} />
+          <button
+            onClick={handleGenerate}
+            disabled={isGenerating}
+            className={cn(
+              'flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-xl transition-all',
+              isGenerating
+                ? 'bg-gray-100 text-gray-400 cursor-wait'
+                : 'bg-violet-600 text-white hover:bg-violet-700 shadow-sm shadow-violet-200'
+            )}
+          >
+            {isGenerating ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : description ? (
+              <RefreshCw className="w-4 h-4" />
+            ) : (
+              <Wand2 className="w-4 h-4" />
+            )}
+            {isGenerating ? 'Generating…' : description ? 'Regenerate' : 'Generate'}
+          </button>
+        </div>
       </div>
 
       {error && (
@@ -323,7 +339,7 @@ export function DescriptionTab({ voiceover, videoClips }: { voiceover: Voiceover
 // ═══════════════════════════════════════════════════════════════════════════
 // TAB 2 — Captions
 // ═══════════════════════════════════════════════════════════════════════════
-function CaptionsTab({
+export function CaptionsTab({
   voiceover,
   captionStyle,
   captionsEnabled,
@@ -342,8 +358,12 @@ function CaptionsTab({
   const [importStatus, setImportStatus] = useState<{ kind: 'ok' | 'error'; message: string } | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
-  const handleMode = (mode: CaptionMode) => onStyleChange({ ...captionStyle, mode });
-  const handlePosition = (position: 'bottom' | 'top') => onStyleChange({ ...captionStyle, position });
+  // Manual tweaks take the style off its named preset, so the picker stops
+  // highlighting it instead of lying about the active look.
+  const updateStyle = (patch: Partial<CaptionStyle>) =>
+    onStyleChange({ ...captionStyle, ...patch, preset: undefined });
+  const handleMode = (mode: CaptionMode) => updateStyle({ mode });
+  const handlePosition = (position: 'bottom' | 'top') => updateStyle({ position });
 
   // Templates load once, at initialization — no effect, no setState-in-effect.
   const [initialLoad] = useState(loadTemplatesResult);
@@ -451,6 +471,39 @@ function CaptionsTab({
         </button>
       </div>
 
+      {/* Presets */}
+      <div className="space-y-3">
+        <p className="text-xs font-bold uppercase tracking-widest text-gray-400">Presets</p>
+        <div className="grid grid-cols-2 gap-3">
+          {CAPTION_PRESET_ORDER.map(name => {
+            const preset = CAPTION_PRESETS[name];
+            const active = captionStyle.preset === name;
+            return (
+              <button
+                key={name}
+                onClick={() => onStyleChange(applyPreset(name))}
+                aria-pressed={active}
+                className={cn(
+                  'flex items-center gap-3 p-3 rounded-xl border text-left transition-all',
+                  active ? 'border-violet-500 bg-violet-50 ring-1 ring-violet-300' : 'border-gray-200 hover:border-gray-300 bg-gray-50'
+                )}
+              >
+                <span
+                  className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg border border-black/10 text-[11px] font-bold"
+                  style={{ backgroundColor: preset.style.bgColor, color: preset.style.color }}
+                >
+                  Aa
+                </span>
+                <span>
+                  <span className="block text-xs font-semibold text-gray-900">{preset.label}</span>
+                  <span className="block text-[10px] text-gray-400 mt-0.5">{preset.description}</span>
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
       {/* Caption style */}
       <div className="space-y-3">
         <p className="text-xs font-bold uppercase tracking-widest text-gray-400">Style</p>
@@ -484,7 +537,7 @@ function CaptionsTab({
           min={12}
           max={36}
           value={captionStyle.fontSize}
-          onChange={e => onStyleChange({ ...captionStyle, fontSize: Number(e.target.value) })}
+          onChange={e => updateStyle({ fontSize: Number(e.target.value) })}
           className="w-full h-1.5 bg-gray-200 rounded-full appearance-none cursor-pointer accent-violet-600"
         />
       </div>
@@ -497,7 +550,7 @@ function CaptionsTab({
             <input
               type="color"
               value={captionStyle.color}
-              onChange={e => onStyleChange({ ...captionStyle, color: e.target.value })}
+              onChange={e => updateStyle({ color: e.target.value })}
               className="w-8 h-8 rounded-lg border-0 cursor-pointer bg-transparent"
             />
             <span className="text-xs font-mono text-gray-500">{captionStyle.color}</span>
@@ -509,7 +562,7 @@ function CaptionsTab({
             <input
               type="color"
               value={captionStyle.bgColor}
-              onChange={e => onStyleChange({ ...captionStyle, bgColor: e.target.value })}
+              onChange={e => updateStyle({ bgColor: e.target.value })}
               className="w-8 h-8 rounded-lg border-0 cursor-pointer bg-transparent"
             />
             <span className="text-xs font-mono text-gray-500">{captionStyle.bgColor}</span>
@@ -761,25 +814,28 @@ export function ThumbnailsTab({
             AI finds the most compelling moments and overlays a key quote
           </p>
         </div>
-        <button
-          onClick={handleGenerate}
-          disabled={isGenerating}
-          className={cn(
-            'flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-xl transition-all',
-            isGenerating
-              ? 'bg-gray-100 text-gray-400 cursor-wait'
-              : 'bg-violet-600 text-white hover:bg-violet-700 shadow-sm shadow-violet-200'
-          )}
-        >
-          {isGenerating ? (
-            <Loader2 className="w-4 h-4 animate-spin" />
-          ) : thumbnails.length > 0 ? (
-            <RefreshCw className="w-4 h-4" />
-          ) : (
-            <Wand2 className="w-4 h-4" />
-          )}
-          {isGenerating ? 'Generating…' : thumbnails.length > 0 ? 'Regenerate' : 'Generate'}
-        </button>
+        <div className="flex items-center gap-3">
+          <CostEstimateBadge estimate={estimateKeyMomentsCost(postProcessingEstimateInput(voiceover, videoClips))} />
+          <button
+            onClick={handleGenerate}
+            disabled={isGenerating}
+            className={cn(
+              'flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-xl transition-all',
+              isGenerating
+                ? 'bg-gray-100 text-gray-400 cursor-wait'
+                : 'bg-violet-600 text-white hover:bg-violet-700 shadow-sm shadow-violet-200'
+            )}
+          >
+            {isGenerating ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : thumbnails.length > 0 ? (
+              <RefreshCw className="w-4 h-4" />
+            ) : (
+              <Wand2 className="w-4 h-4" />
+            )}
+            {isGenerating ? 'Generating…' : thumbnails.length > 0 ? 'Regenerate' : 'Generate'}
+          </button>
+        </div>
       </div>
 
       {isGenerating && progress && (

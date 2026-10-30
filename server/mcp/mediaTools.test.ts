@@ -408,7 +408,15 @@ describe('tool registry', () => {
     const { tools } = await client.listTools();
 
     const names = tools.map((tool) => tool.name).sort();
-    expect(names).toEqual(['attach_media', 'get_project', 'list_projects', 'upload_media']);
+    expect(names).toEqual([
+      'attach_media',
+      'create_project',
+      'delete_project',
+      'get_project',
+      'list_projects',
+      'update_project',
+      'upload_media',
+    ]);
     for (const tool of tools) {
       expect(tool.inputSchema.type).toBe('object');
     }
