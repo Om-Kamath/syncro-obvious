@@ -39,6 +39,8 @@ import {
   CheckCircle2,
   Activity,
   Key,
+  FolderDown,
+  FolderInput,
   FolderOpen,
 } from 'lucide-react';
 import { setApiKey, hasApiKey } from './services/apiKey';
@@ -47,6 +49,8 @@ import { DEFAULT_CAPTION_STYLE } from './utils/captionPresets';
 import { captureFilmstrip } from './utils/clipThumbnails';
 import { estimateNarrationFlowCost, estimateTtsCost } from './services/costEstimate';
 import { CostEstimateBadge } from './components/CostEstimateBadge';
+import { downloadBlob } from './utils/captionUtils';
+import { exportProjectZip, importProjectZip, ProjectZipError } from './services/projectZip';
 import { motion, AnimatePresence } from 'motion/react';
 import { ProjectSaveModal } from './components/ProjectSaveModal';
 import { RestoreErrorBanner } from './components/RestoreErrorBanner';
@@ -291,6 +295,9 @@ export default function App() {
   const [restoreErrors, setRestoreErrors] = useState<ClipRestoreError[]>([]);
   const [restoreVoiceoverError, setRestoreVoiceoverError] = useState<string | null>(null);
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
+  const [isExportingProject, setIsExportingProject] = useState(false);
+  const [isImportingProject, setIsImportingProject] = useState(false);
+  const projectImportInputRef = useRef<HTMLInputElement>(null);
   const videoRefs = useRef<Record<string, HTMLVideoElement>>({});
   const transportRef = useRef<TimelineTransport | null>(null);
   const [previewHeight, setPreviewHeight] = useState(260);
@@ -566,6 +573,42 @@ export default function App() {
   };
 
   const handleClipEdit = (updated: VideoClip) => setVideoClips(prev => prev.map(c => c.id === updated.id ? updated : c));
+
+  const handleExportProjectZip = async () => {
+    if (isExportingProject || (videoClips.length === 0 && !voiceover)) return;
+    setIsExportingProject(true);
+    try {
+      const blob = await exportProjectZip({ clips: videoClips, voiceover, captionsEnabled, captionStyle });
+      downloadBlob(blob, 'syncro-project.zip');
+    } catch (err) {
+      console.error('Project export failed:', err);
+      alert(`Failed to export project: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setIsExportingProject(false);
+    }
+  };
+
+  const handleImportProjectZip = async (file: File) => {
+    if (isImportingProject) return;
+    setIsImportingProject(true);
+    try {
+      const project = await importProjectZip(file);
+      // Swap the working project only after the archive parsed cleanly, then
+      // release the replaced clips' blob URLs so the swap doesn't leak them.
+      videoClips.forEach(clip => URL.revokeObjectURL(clip.url));
+      replaceVoiceover(project.voiceover);
+      setVideoClips(project.clips);
+      setCaptionsEnabled(project.captionsEnabled);
+      setCaptionStyle(project.captionStyle);
+      setOnboardingStep(null);
+    } catch (err) {
+      console.error('Project import failed:', err);
+      alert(err instanceof ProjectZipError ? err.message : `Failed to import project: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setIsImportingProject(false);
+    }
+  };
+
   const handleOnboardingNext = () => { if (onboardingStep === 1) setOnboardingStep(2); else setOnboardingStep(null); };
   const editingClip = videoClips.find(c => c.id === editingClipId) ?? null;
 
@@ -688,6 +731,35 @@ export default function App() {
             )}
           >
             <Activity className="w-3 h-3" /> Logs
+          </button>
+          <input
+            ref={projectImportInputRef}
+            type="file"
+            accept=".zip,application/zip,application/x-zip-compressed"
+            className="hidden"
+            onChange={e => {
+              const file = e.target.files?.[0];
+              e.target.value = '';
+              if (file) void handleImportProjectZip(file);
+            }}
+          />
+          <button
+            onClick={() => projectImportInputRef.current?.click()}
+            disabled={isExportingProject || isImportingProject}
+            title="Import project (.zip)"
+            aria-label="Import project (.zip)"
+            className="p-2 rounded-full text-gray-400 hover:text-violet-600 hover:bg-violet-50 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            {isImportingProject ? <Loader2 className="w-4 h-4 animate-spin" /> : <FolderInput className="w-4 h-4" />}
+          </button>
+          <button
+            onClick={handleExportProjectZip}
+            disabled={isExportingProject || isImportingProject || (videoClips.length === 0 && !voiceover)}
+            title={videoClips.length === 0 && !voiceover ? 'Add clips or a voiceover to export a project' : 'Export project (.zip)'}
+            aria-label="Export project (.zip)"
+            className="p-2 rounded-full text-gray-400 hover:text-violet-600 hover:bg-violet-50 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            {isExportingProject ? <Loader2 className="w-4 h-4 animate-spin" /> : <FolderDown className="w-4 h-4" />}
           </button>
           <button
             onClick={() => { setApiKeyInput(''); setShowApiKeyModal(true); }}
