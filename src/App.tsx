@@ -12,6 +12,8 @@ import { VoiceoverEditor } from './components/VoiceoverEditor';
 import { LogPanel } from './components/LogPanel';
 import { ToastContainer } from './components/ToastContainer';
 import { toast } from './services/toastStore';
+import { ShortcutHelpOverlay } from './components/ShortcutHelpOverlay';
+import { isShortcutHelpToggle } from './utils/shortcutRegistry';
 import {
   analyzeVoiceover,
   analyzeVideo,
@@ -39,6 +41,7 @@ import {
   Activity,
   Key,
   FolderOpen,
+  Keyboard,
 } from 'lucide-react';
 import { setApiKey, hasApiKey } from './services/apiKey';
 import { chainClips, rippleDeleteMany } from './utils/chainClips';
@@ -290,6 +293,7 @@ export default function App() {
   const [restoreErrors, setRestoreErrors] = useState<ClipRestoreError[]>([]);
   const [restoreVoiceoverError, setRestoreVoiceoverError] = useState<string | null>(null);
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
+  const [showShortcutHelp, setShowShortcutHelp] = useState(false);
   const videoRefs = useRef<Record<string, HTMLVideoElement>>({});
   const transportRef = useRef<TimelineTransport | null>(null);
   const [previewHeight, setPreviewHeight] = useState(260);
@@ -364,6 +368,18 @@ export default function App() {
     const lastVideo = videoRefs.current[last.id];
     if (lastVideo) lastVideo.currentTime = last.duration;
   }, [currentTime, videoClips]);
+
+  // "?" toggles the keyboard shortcut help overlay; ignored while typing in
+  // text-entry elements so "?" stays a literal character there.
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (isShortcutHelpToggle(e) && !getShortcutContext(e.target).isTextEntry) {
+        setShowShortcutHelp(v => !v);
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, []);
 
   const getVideoDuration = (url: string): Promise<number> =>
     new Promise(resolve => { const v = document.createElement('video'); v.src = url; v.onloadedmetadata = () => resolve(v.duration); v.onerror = () => resolve(0); });
@@ -697,6 +713,14 @@ export default function App() {
             )}
           >
             <Key className="w-4 h-4" />
+          </button>
+          <button
+            onClick={() => setShowShortcutHelp(v => !v)}
+            title="Keyboard shortcuts (?)"
+            aria-label="Toggle keyboard shortcuts overlay"
+            className="p-2 rounded-full text-gray-400 hover:text-violet-600 hover:bg-violet-50 transition-colors"
+          >
+            <Keyboard className="w-4 h-4" />
           </button>
           {onboardingStep === null && (
             <>
@@ -1068,6 +1092,8 @@ export default function App() {
       </AnimatePresence>
 
       <MediaDropLayer onImport={handleAppDropImport} onRejected={handleAppDropRejected} />
+      {/* Shortcut Help Overlay */}
+      <ShortcutHelpOverlay open={showShortcutHelp} onClose={() => setShowShortcutHelp(false)} />
     </div>
   );
 }
