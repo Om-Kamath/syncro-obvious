@@ -60,6 +60,13 @@ export interface CaptionStyle {
   position: 'bottom' | 'top';
 }
 
+export interface CaptionTemplate {
+  id: string;
+  name: string;
+  style: CaptionStyle;
+  createdAt: number;
+}
+
 export interface ThumbnailCandidate {
   id: string;
   timestamp: number;
