@@ -4,6 +4,7 @@ import { render, screen, cleanup, fireEvent } from '@testing-library/react';
 import { PublishChecklistTab } from './PublishChecklistTab';
 import { generateSRT } from '../utils/captionUtils';
 import { downloadDataUrl } from '../utils/exportUtils';
+import { loadChecklistState, saveChecklistState } from '../services/publishChecklistStore';
 import type { ThumbnailCandidate, VideoDescription, Voiceover } from '../types';
 
 vi.mock('../utils/captionUtils', async importOriginal => {
@@ -45,6 +46,7 @@ describe('PublishChecklistTab', () => {
   let writeText: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
+    localStorage.clear();
     writeText = vi.fn().mockResolvedValue(undefined);
     Object.defineProperty(navigator, 'clipboard', {
       value: { writeText },
@@ -201,5 +203,52 @@ describe('PublishChecklistTab', () => {
     fireEvent.change(screen.getByLabelText('Video title'), { target: { value: 'Solo title' } });
     expect(screen.getByText('1 of 6 ready')).toBeDefined();
     expect(screen.getByRole('button', { name: 'Copy title' })).toBeDefined();
+  });
+
+  it('restores the saved title and selected platform on mount', () => {
+    saveChecklistState({
+      activePlatform: 'tiktok',
+      platforms: { tiktok: { title: 'Saved title' } },
+    });
+
+    render(
+      <PublishChecklistTab
+        voiceover={voiceover}
+        description={description}
+        thumbnails={thumbnails}
+      />
+    );
+
+    expect((screen.getByLabelText('Video title') as HTMLInputElement).value).toBe('Saved title');
+    expect(screen.getByRole('button', { name: 'TikTok' }).getAttribute('aria-pressed')).toBe('true');
+  });
+
+  it('persists typed titles and platform switches for the next load', () => {
+    render(
+      <PublishChecklistTab
+        voiceover={voiceover}
+        description={description}
+        thumbnails={thumbnails}
+      />
+    );
+    fireEvent.change(screen.getByLabelText('Video title'), { target: { value: 'Persisted' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Instagram' }));
+
+    const saved = loadChecklistState();
+    expect(saved.activePlatform).toBe('instagram');
+    expect(saved.platforms.youtube?.title).toBe('Persisted');
+  });
+
+  it('starts empty instead of crashing when saved checklist state is corrupted', () => {
+    // The storage key lives in publishChecklistStore; seed it directly to
+    // simulate a payload corrupted outside the app.
+    localStorage.setItem('syncro_publish_checklist', '{not valid json');
+
+    render(
+      <PublishChecklistTab voiceover={null} description={null} thumbnails={[]} />
+    );
+
+    expect((screen.getByLabelText('Video title') as HTMLInputElement).value).toBe('');
+    expect(screen.getByText('0 of 6 ready')).toBeDefined();
   });
 });
