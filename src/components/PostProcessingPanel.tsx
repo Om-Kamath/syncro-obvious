@@ -25,6 +25,7 @@ import { generateSRT, generateVTT, downloadTextFile } from '../utils/captionUtil
 import { captureVideoFrame, addQuoteOverlay, downloadDataUrl, downloadFile, getClipAtTime } from '../utils/exportUtils';
 import { EXPORT_PRESETS, DEFAULT_EXPORT_PRESET, computeDrawGeometry, type ExportPresetId } from '../utils/exportPresets';
 import { PLATFORM_PRESETS, DEFAULT_PLATFORM_PRESET, supportsChapters, type PlatformId } from '../utils/platformPresets';
+import { PLATFORM_LIMITS, evaluateMetadata, type FieldCount, type FieldStatus } from '../utils/platformLimits';
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -118,12 +119,37 @@ function CopyButton({ text, className }: { text: string; className?: string }) {
 // ═══════════════════════════════════════════════════════════════════════════
 // TAB 1 — Description & Chapters
 // ═══════════════════════════════════════════════════════════════════════════
+// -- Metadata counter chip -----------------------------------------------------
+const COUNTER_STYLES: Record<FieldStatus, string> = {
+  ok: 'bg-gray-100 text-gray-500',
+  warn: 'bg-amber-50 text-amber-600',
+  over: 'bg-red-50 text-red-500',
+};
+
+function MetadataCounter({ label, count, platform }: { label: string; count: FieldCount; platform: PlatformId }) {
+  const hint =
+    count.status === 'over'
+      ? `Over the ${PLATFORM_LIMITS[platform].label} limit`
+      : count.status === 'warn'
+      ? `Approaching the ${PLATFORM_LIMITS[platform].label} limit`
+      : undefined;
+  return (
+    <span
+      title={hint}
+      className={cn('px-2.5 py-1 text-xs font-medium rounded-lg tabular-nums', COUNTER_STYLES[count.status])}
+    >
+      {label} {count.current}/{count.limit}
+    </span>
+  );
+}
+
 function DescriptionTab({ voiceover, videoClips }: { voiceover: Voiceover; videoClips: VideoClip[] }) {
   const [platform, setPlatform] = useState<PlatformId>(DEFAULT_PLATFORM_PRESET);
   const [description, setDescription] = useState<VideoDescription | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
   const [error, setError] = useState('');
   const [showHashtags, setShowHashtags] = useState(false);
+  const [title, setTitle] = useState('');
 
   const preset = PLATFORM_PRESETS[platform];
   const withChapters = supportsChapters(preset);
@@ -173,6 +199,13 @@ function DescriptionTab({ voiceover, videoClips }: { voiceover: Voiceover; video
         description.hashtags.map(h => `#${h}`).join(' '),
       ].join('\n')
     : '';
+
+  const metadata = evaluateMetadata(
+    { title, description: fullDescriptionText, hashtags: description?.hashtags ?? [] },
+    platform
+  );
+  const overFields = (['title', 'description', 'hashtags'] as const)
+    .filter(k => metadata[k].status === 'over');
 
   if (!canGenerate) {
     return (
@@ -237,6 +270,32 @@ function DescriptionTab({ voiceover, videoClips }: { voiceover: Voiceover; video
           {error}
         </div>
       )}
+
+      {/* Platform metadata limits */}
+      <div className="bg-gray-50 border border-gray-100 rounded-2xl p-4 space-y-3">
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-[10px] font-bold uppercase tracking-widest text-gray-400">
+            {preset.label} Limits
+          </span>
+        </div>
+        <input
+          type="text"
+          value={title}
+          onChange={e => setTitle(e.target.value)}
+          placeholder="Video title"
+          className="w-full text-sm text-gray-700 placeholder-gray-300 bg-white border border-gray-200 rounded-xl px-3 py-2 focus:outline-none focus:border-violet-400"
+        />
+        <div className="flex flex-wrap gap-2">
+          <MetadataCounter label="Title" count={metadata.title} platform={platform} />
+          <MetadataCounter label="Description" count={metadata.description} platform={platform} />
+          <MetadataCounter label="Hashtags" count={metadata.hashtags} platform={platform} />
+        </div>
+        {overFields.length > 0 && (
+          <p className="text-xs text-red-500">
+            Over the {PLATFORM_LIMITS[platform].label} limit: {overFields.join(', ')} — trim before publishing.
+          </p>
+        )}
+      </div>
 
       <AnimatePresence>
         {description && (
