@@ -85,3 +85,23 @@ export function toAudioBuffer(source: AudioChannels, factory: AudioBufferFactory
   }
   return out;
 }
+
+// Pure mix-gain model shared by preview playback and the export recorder.
+// A gain of 0 means the source contributes silence to the mix.
+export type MixSourceKind = 'clip' | 'voiceover';
+
+export interface MixSource {
+  readonly id: string;
+  readonly kind: MixSourceKind;
+}
+
+// The voiceover is the narration bed and always passes through; only the
+// source clips (the "original audio") respond to the mute toggle.
+export function sourceGain(kind: MixSourceKind, muteOriginalAudio: boolean): number {
+  if (kind === 'voiceover') return 1;
+  return muteOriginalAudio ? 0 : 1;
+}
+
+export function computeMixGains(sources: readonly MixSource[], muteOriginalAudio: boolean): Record<string, number> {
+  return Object.fromEntries(sources.map(s => [s.id, sourceGain(s.kind, muteOriginalAudio)]));
+}

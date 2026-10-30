@@ -171,3 +171,44 @@ describe('toAudioBuffer', () => {
     expect(buf.getChannelData(0)).toBe(factory.created[0].data[0]);
   });
 });
+import { computeMixGains, sourceGain, type MixSource } from './audioMix';
+
+const clips: MixSource[] = [
+  { id: 'clip-a', kind: 'clip' },
+  { id: 'clip-b', kind: 'clip' },
+];
+const withVoiceover: MixSource[] = [...clips, { id: 'voiceover', kind: 'voiceover' }];
+
+describe('sourceGain', () => {
+  it('gives muted source clips a gain of 0 — they contribute silence to the mix', () => {
+    expect(sourceGain('clip', true)).toBe(0);
+  });
+
+  it('gives unmuted source clips full gain', () => {
+    expect(sourceGain('clip', false)).toBe(1);
+  });
+
+  it('always passes the voiceover through, muted or not', () => {
+    expect(sourceGain('voiceover', true)).toBe(1);
+    expect(sourceGain('voiceover', false)).toBe(1);
+  });
+});
+
+describe('computeMixGains', () => {
+  it('muted source contributes silence while the voiceover stays audible', () => {
+    const gains = computeMixGains(withVoiceover, true);
+    expect(gains['clip-a']).toBe(0);
+    expect(gains['clip-b']).toBe(0);
+    expect(gains['voiceover']).toBe(1);
+  });
+
+  it('unmuted project mixes every source at full gain', () => {
+    const gains = computeMixGains(withVoiceover, false);
+    expect(gains).toEqual({ 'clip-a': 1, 'clip-b': 1, voiceover: 1 });
+  });
+
+  it('covers a project with clips but no voiceover', () => {
+    expect(computeMixGains(clips, true)).toEqual({ 'clip-a': 0, 'clip-b': 0 });
+    expect(computeMixGains(clips, false)).toEqual({ 'clip-a': 1, 'clip-b': 1 });
+  });
+});

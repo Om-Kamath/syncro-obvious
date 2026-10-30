@@ -37,6 +37,8 @@ import type { PostProcessingInput } from '../services/costEstimate';
 import { CostEstimateBadge } from './CostEstimateBadge';
 import { EXPORT_PRESETS, DEFAULT_EXPORT_PRESET, computeDrawGeometry, type ExportPresetId } from '../utils/exportPresets';
 import { audioChannelsOf, mixAudio, sliceAudioWindow, toAudioBuffer } from '../utils/audioMix';
+import { computeMixGains } from '../utils/audioMix';
+import { MuteOriginalAudioToggle } from './MuteOriginalAudioToggle';
 import { MusicPanel, DEFAULT_MUSIC_VOLUME } from './MusicPanel';
 import { EXPORT_CODECS, DEFAULT_EXPORT_CODEC, selectMimeType, type ExportCodecId } from '../utils/exportCodecs';
 import {
@@ -913,11 +915,15 @@ function ExportTab({
   videoClips,
   captionStyle,
   captionsEnabled,
+  muteOriginalAudio,
+  onMuteOriginalAudioChange,
 }: {
   voiceover: Voiceover | null;
   videoClips: VideoClip[];
   captionStyle: CaptionStyle;
   captionsEnabled: boolean;
+  muteOriginalAudio: boolean;
+  onMuteOriginalAudioChange: (muted: boolean) => void;
 }) {
   const [isExporting, setIsExporting] = useState(false);
   const [exportProgress, setExportProgress] = useState(0);
@@ -979,7 +985,9 @@ function ExportTab({
         new Promise<void>(res => {
           const v = document.createElement('video');
           v.src = clip.url;
-          v.muted = true;
+          // Not muted: clip audio is routed through a per-clip gain node into
+          // the recording mix below. Clips are never connected to
+          // audioCtx.destination, so nothing bleeds to the speakers.
           v.preload = 'auto';
           v.addEventListener('loadeddata', () => { renderVids[clip.id] = v; res(); }, { once: true });
           v.addEventListener('error', () => res(), { once: true }); // skip broken clips, don't store
@@ -1021,6 +1029,24 @@ function ExportTab({
       source.connect(dest);
       source.connect(audioCtx.destination);
 
+      // Route each clip's own audio into the recording mix through a gain
+      // node. A muted source contributes silence (gain 0) but stays connected,
+      // so the mix topology never changes mid-export.
+      const mixGains = computeMixGains(
+        [
+          ...videoClips.map(c => ({ id: c.id, kind: 'clip' as const })),
+          { id: 'voiceover', kind: 'voiceover' as const },
+        ],
+        muteOriginalAudio,
+      );
+      for (const [clipId, v] of Object.entries(renderVids)) {
+        const clipSrc = audioCtx.createMediaElementSource(v);
+        const clipGain = audioCtx.createGain();
+        clipGain.gain.value = mixGains[clipId] ?? 1;
+        clipSrc.connect(clipGain);
+        clipGain.connect(dest);
+      }
+
       // Build combined stream
       const canvasStream = canvas.captureStream(30);
       const combined = new MediaStream([
@@ -1061,19 +1087,26 @@ function ExportTab({
 
         // Find active clip
         const hit = getClipAtTime(videoClips, elapsed);
+        let playingVid: HTMLVideoElement | null = null;
         ctx.fillStyle = '#000';
         ctx.fillRect(0, 0, W, H);
         if (hit) {
           const v = renderVids[hit.clip.id];
           if (v) {
-            // Seek if drifted; play (muted) so frames decode
+            // Seek if drifted; play so frames decode (and unmuted audio joins the mix)
             if (Math.abs(v.currentTime - hit.localTime) > 0.2) v.currentTime = hit.localTime;
             if (v.paused) v.play().catch(() => {});
+            playingVid = v;
             try {
               const g = computeDrawGeometry(preset, v.videoWidth, v.videoHeight);
               ctx.drawImage(v, g.dx, g.dy, g.dWidth, g.dHeight);
             } catch { /* skip */ }
           }
+        }
+        // Only the active clip may sound — pause anything left playing from
+        // the previous clip window.
+        for (const v of Object.values(renderVids)) {
+          if (v !== playingVid && !v.paused) v.pause();
         }
 
         // Draw captions
@@ -1226,6 +1259,17 @@ function ExportTab({
               onFileChange={setMusicFile}
               onVolumeChange={setMusicVolume}
             />
+
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-xs font-semibold text-gray-900">Original video audio</p>
+                <p className="text-[11px] text-gray-400 mt-0.5">
+                  Include the clips' own sound in preview playback and the export mix.
+                  Mute to keep only the voiceover.
+                </p>
+              </div>
+              <MuteOriginalAudioToggle muted={muteOriginalAudio} onChange={onMuteOriginalAudioChange} />
+            </div>
 
             {exportError && (
               <div className="p-2 bg-red-50 border border-red-200 rounded-lg text-xs text-red-500" role="alert">
@@ -1424,6 +1468,8 @@ interface PostProcessingPanelProps {
   onCaptionsEnabledChange: (v: boolean) => void;
   importedThumbnails?: ThumbnailCandidate[];
   onImportCaptions: (segments: CaptionSegment[], transcription: string) => void;
+  muteOriginalAudio: boolean;
+  onMuteOriginalAudioChange: (muted: boolean) => void;
 }
 
 export function PostProcessingPanel({
@@ -1435,6 +1481,8 @@ export function PostProcessingPanel({
   onCaptionsEnabledChange,
   importedThumbnails = [],
   onImportCaptions,
+  muteOriginalAudio,
+  onMuteOriginalAudioChange,
 }: PostProcessingPanelProps) {
   const [activeTab, setActiveTab] = useState<Tab>('description');
 
@@ -1542,6 +1590,8 @@ export function PostProcessingPanel({
               videoClips={videoClips}
               captionStyle={captionStyle}
               captionsEnabled={captionsEnabled}
+              muteOriginalAudio={muteOriginalAudio}
+              onMuteOriginalAudioChange={onMuteOriginalAudioChange}
             />
           )}
         </motion.div>
