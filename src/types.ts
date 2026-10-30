@@ -85,6 +85,7 @@ export interface ThumbnailCandidate {
   quote: string;
   reason: string;
   imageDataUrl: string;
+  source?: 'ai' | 'imported'; // absent = AI-generated candidate
 }
 
 

@@ -23,7 +23,7 @@ import {
 import { VideoClip, Voiceover, CaptionStyle, CaptionMode, VideoDescription, ThumbnailCandidate } from '../types';
 import { generateDescription, identifyKeyMoments } from '../services/postProcessing';
 import { normalizeErrorMessage } from '../services/geminiClient';
-import { generateSRT, generateVTT, downloadTextFile } from '../utils/captionUtils';
+import { generateSRT, generateVTT, downloadTextFile, generateChaptersTxt, formatChapterTime } from '../utils/captionUtils';
 import { CAPTION_PRESETS, CAPTION_PRESET_ORDER, applyPreset } from '../utils/captionPresets';
 import { listTemplates, saveTemplate, deleteTemplate, applyTemplate, loadTemplatesResult } from '../services/captionTemplates';
 import type { CaptionTemplate } from '../types';
@@ -31,17 +31,10 @@ import { captureVideoFrame, addQuoteOverlay, downloadDataUrl, downloadFile, getC
 import { EXPORT_PRESETS, DEFAULT_EXPORT_PRESET, computeDrawGeometry, type ExportPresetId } from '../utils/exportPresets';
 import { audioChannelsOf, mixAudio, sliceAudioWindow, toAudioBuffer } from '../utils/audioMix';
 import { MusicPanel, DEFAULT_MUSIC_VOLUME } from './MusicPanel';
+import { EXPORT_CODECS, DEFAULT_EXPORT_CODEC, selectMimeType, type ExportCodecId } from '../utils/exportCodecs';
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
-}
-
-function formatTimestamp(s: number): string {
-  const h = Math.floor(s / 3600);
-  const m = Math.floor((s % 3600) / 60);
-  const sec = Math.floor(s % 60);
-  if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
-  return `${m}:${String(sec).padStart(2, '0')}`;
 }
 
 // ── Tab button ──────────────────────────────────────────────────────────────
@@ -152,6 +145,13 @@ export function DescriptionTab({ voiceover, videoClips }: { voiceover: Voiceover
     }
   };
 
+  const chaptersText = description ? generateChaptersTxt(description.chapters) : '';
+
+  const handleDownloadChapters = () => {
+    if (!description) return;
+    downloadTextFile(generateChaptersTxt(description.chapters), 'chapters.txt', 'text/plain');
+  };
+
   const fullDescriptionText = description
     ? [
         description.summary,
@@ -159,7 +159,7 @@ export function DescriptionTab({ voiceover, videoClips }: { voiceover: Voiceover
         '━━━━━━━━━━━━━━━━━━━━',
         'CHAPTERS',
         '━━━━━━━━━━━━━━━━━━━━',
-        ...description.chapters.map(c => `${formatTimestamp(c.time)} ${c.label}`),
+        generateChaptersTxt(description.chapters),
         '',
         description.hashtags.map(h => `#${h}`).join(' '),
       ].join('\n')
@@ -227,17 +227,23 @@ export function DescriptionTab({ voiceover, videoClips }: { voiceover: Voiceover
                 <span className="text-[10px] font-bold uppercase tracking-widest text-gray-400">
                   Chapters ({description.chapters.length})
                 </span>
-                <CopyButton
-                  text={description.chapters
-                    .map(c => `${formatTimestamp(c.time)} ${c.label}`)
-                    .join('\n')}
-                />
+                <div className="flex items-center gap-1.5">
+                  <button
+                    onClick={handleDownloadChapters}
+                    aria-label="Download chapters as YouTube-format txt"
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg transition-all bg-gray-100 text-gray-500 hover:bg-gray-200"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    .txt
+                  </button>
+                  <CopyButton text={chaptersText} />
+                </div>
               </div>
               <div className="space-y-1 mt-1">
                 {description.chapters.map((ch, i) => (
                   <div key={i} className="flex items-center gap-3 py-1">
                     <span className="font-mono text-xs font-bold text-violet-400 w-10 flex-shrink-0">
-                      {formatTimestamp(ch.time)}
+                      {formatChapterTime(ch.time)}
                     </span>
                     <span className="text-sm text-gray-700">{ch.label}</span>
                   </div>
@@ -608,17 +614,26 @@ export function CaptionsTab({
 // ═══════════════════════════════════════════════════════════════════════════
 // TAB 3 — Thumbnails
 // ═══════════════════════════════════════════════════════════════════════════
-export function ThumbnailsTab({ voiceover, videoClips }: { voiceover: Voiceover; videoClips: VideoClip[] }) {
+export function ThumbnailsTab({
+  voiceover,
+  videoClips,
+  importedThumbnails = [],
+}: {
+  voiceover: Voiceover | null;
+  videoClips: VideoClip[];
+  importedThumbnails?: ThumbnailCandidate[];
+}) {
   const [thumbnails, setThumbnails] = useState<ThumbnailCandidate[]>([]);
   const [isGenerating, setIsGenerating] = useState(false);
   const [progress, setProgress] = useState('');
   const [error, setError] = useState('');
 
   const canGenerate =
-    !!voiceover.transcription && !!voiceover.segments?.length && videoClips.length > 0;
+    !!voiceover?.transcription && !!voiceover?.segments?.length && videoClips.length > 0;
+  const allThumbnails = [...thumbnails, ...importedThumbnails];
 
   const handleGenerate = async () => {
-    if (!voiceover.transcription || !voiceover.segments) return;
+    if (!voiceover?.transcription || !voiceover.segments) return;
     setIsGenerating(true);
     setError('');
     setProgress('Asking AI to identify key moments…');
@@ -662,9 +677,28 @@ export function ThumbnailsTab({ voiceover, videoClips }: { voiceover: Voiceover;
     }
   };
 
+  // Imported images are viewable without AI analysis; only the fully empty
+  // state is locked.
+  if (!canGenerate && importedThumbnails.length === 0) {
+    return (
+      <LockedState
+        message={
+          voiceover
+            ? 'Upload videos and run AI Auto-Align first to enable thumbnail generation.'
+            : 'Upload a voiceover and run AI Auto-Align to generate thumbnails.'
+        }
+      />
+    );
+  }
+
   if (!canGenerate) {
     return (
-      <LockedState message="Upload videos and run AI Auto-Align first to enable thumbnail generation." />
+      <div className="space-y-5">
+        <p className="text-xs text-violet-500">
+          Imported images appear here. Run AI Auto-Align to unlock AI thumbnail generation.
+        </p>
+        <ThumbnailGrid items={importedThumbnails} />
+      </div>
     );
   }
 
@@ -711,54 +745,68 @@ export function ThumbnailsTab({ voiceover, videoClips }: { voiceover: Voiceover;
         </div>
       )}
 
-      <AnimatePresence>
-        {thumbnails.length > 0 && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            className="grid grid-cols-2 gap-4"
-          >
-            {thumbnails.map((thumb, i) => (
-              <motion.div
-                key={thumb.id}
-                initial={{ opacity: 0, scale: 0.95 }}
-                animate={{ opacity: 1, scale: 1 }}
-                transition={{ delay: i * 0.05 }}
-                className="group rounded-2xl border border-gray-200 overflow-hidden bg-gray-50 hover:border-violet-400 hover:shadow-lg hover:shadow-violet-200/50 transition-all"
-              >
-                <div className="relative aspect-video bg-black/50">
-                  <img
-                    src={thumb.imageDataUrl}
-                    alt={thumb.quote}
-                    className="w-full h-full object-cover"
-                  />
-                  <div className="absolute top-2 left-2">
-                    <span className="px-2 py-0.5 bg-black/60 text-white text-[10px] font-mono rounded-md">
-                      {formatTimestamp(thumb.timestamp)}
-                    </span>
-                  </div>
-                </div>
-                <div className="p-3 space-y-2">
-                  <p className="text-xs font-semibold text-gray-900 line-clamp-1">"{thumb.quote}"</p>
-                  <p className="text-[10px] text-violet-500 line-clamp-2">{thumb.reason}</p>
-                  <button
-                    onClick={() =>
-                      downloadDataUrl(thumb.imageDataUrl, `thumbnail-${i + 1}-${thumb.timestamp}s.jpg`)
-                    }
-                    className="flex items-center gap-1.5 w-full justify-center py-1.5 text-xs font-semibold bg-gray-100 border border-gray-200 text-violet-400 rounded-lg hover:bg-violet-50 hover:text-violet-600 hover:border-violet-400 transition-all"
-                  >
-                    <Download className="w-3.5 h-3.5" />
-                    Download PNG
-                  </button>
-                </div>
-              </motion.div>
-            ))}
-          </motion.div>
-        )}
-      </AnimatePresence>
+      <ThumbnailGrid items={allThumbnails} />
     </div>
   );
 }
+
+function ThumbnailGrid({ items }: { items: ThumbnailCandidate[] }) {
+  return (
+    <AnimatePresence>
+      {items.length > 0 && (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          className="grid grid-cols-2 gap-4"
+        >
+          {items.map((thumb, i) => (
+            <motion.div
+              key={thumb.id}
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              transition={{ delay: i * 0.05 }}
+              className="group rounded-2xl border border-gray-200 overflow-hidden bg-gray-50 hover:border-violet-400 hover:shadow-lg hover:shadow-violet-200/50 transition-all"
+            >
+              <div className="relative aspect-video bg-black/50">
+                <img
+                  src={thumb.imageDataUrl}
+                  alt={thumb.quote}
+                  className="w-full h-full object-cover"
+                />
+                {thumb.source !== 'imported' && (
+                  <div className="absolute top-2 left-2">
+                    <span className="px-2 py-0.5 bg-black/60 text-white text-[10px] font-mono rounded-md">
+                      {formatChapterTime(thumb.timestamp)}
+                    </span>
+                  </div>
+                )}
+              </div>
+              <div className="p-3 space-y-2">
+                <p className="text-xs font-semibold text-gray-900 line-clamp-1">"{thumb.quote}"</p>
+                <p className="text-[10px] text-violet-500 line-clamp-2">{thumb.reason}</p>
+                <button
+                  onClick={() =>
+                    downloadDataUrl(
+                      thumb.imageDataUrl,
+                      thumb.source === 'imported'
+                        ? thumb.quote
+                        : `thumbnail-${i + 1}-${thumb.timestamp}s.jpg`
+                    )
+                  }
+                  className="flex items-center gap-1.5 w-full justify-center py-1.5 text-xs font-semibold bg-gray-100 border border-gray-200 text-violet-400 rounded-lg hover:bg-violet-50 hover:text-violet-600 hover:border-violet-400 transition-all"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  Download PNG
+                </button>
+              </div>
+            </motion.div>
+          ))}
+        </motion.div>
+      )}
+    </AnimatePresence>
+  );
+}
+
 
 // ═══════════════════════════════════════════════════════════════════════════
 // TAB 4 — Export
@@ -781,6 +829,13 @@ function ExportTab({
   const [musicFile, setMusicFile] = useState<File | null>(null);
   const [musicVolume, setMusicVolume] = useState(DEFAULT_MUSIC_VOLUME);
   const [exportError, setExportError] = useState<string | null>(null);
+  const [codecId, setCodecId] = useState<ExportCodecId>(DEFAULT_EXPORT_CODEC);
+  // Probe MediaRecorder support on render — cheap (a handful of string checks)
+  // and always current, so the UI reflects what a recording would actually use.
+  const selected = selectMimeType(
+    codecId,
+    m => typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported(m)
+  );
   const stopRef = useRef<(() => void) | null>(null);
 
   const handleDownloadAsset = (url: string, name: string) => {
@@ -870,15 +925,13 @@ function ExportTab({
         ...dest.stream.getTracks(),
       ]);
 
-      const { mimeType, ext, label } = pickMimeType();
+      const { mimeType, ext } = selected;
       const recorder = new MediaRecorder(combined, { mimeType });
       const chunks: Blob[] = [];
       recorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
       recorder.onstop = () => {
         const blob = new Blob(chunks, { type: mimeType });
         downloadFile(blob, `syncvoice-export.${ext}`);
-        // suppress unused warning
-        void label;
         setIsExporting(false);
         setExportProgress(0);
         Object.values(renderVids).forEach(v => { v.pause(); v.remove(); });
@@ -1046,7 +1099,6 @@ function ExportTab({
                 <p className="text-xs text-violet-500 mt-0.5">
                   Records the aligned sequence with narration audio
                   {captionsEnabled ? ' and burned-in captions' : ''}.
-                  Saves as MP4 (H.264) when supported by your browser, otherwise WebM.
                 </p>
               </div>
             </div>
@@ -1093,6 +1145,39 @@ function ExportTab({
               </p>
             </div>
 
+            <div className="space-y-2">
+              <p className="text-xs font-semibold text-gray-900">Format</p>
+              <div className="grid grid-cols-2 gap-2">
+                {Object.values(EXPORT_CODECS).map(c => (
+                  <button
+                    key={c.id}
+                    onClick={() => setCodecId(c.id)}
+                    disabled={isExporting}
+                    className={cn(
+                      'flex flex-col items-center gap-0.5 px-2 py-2 rounded-xl border text-xs font-semibold transition-all disabled:opacity-50',
+                      codecId === c.id
+                        ? 'bg-violet-50 border-violet-400 text-violet-600'
+                        : 'bg-white border-gray-200 text-gray-600 hover:border-violet-300'
+                    )}
+                  >
+                    <span>{c.label}</span>
+                    <span className="text-[10px] font-normal text-gray-400 text-center leading-tight">
+                      {c.description}
+                    </span>
+                  </button>
+                ))}
+              </div>
+              <p className="text-[10px] text-gray-400">
+                Records as {selected.label} · {selected.mimeType}
+              </p>
+              {selected.codec !== codecId && (
+                <p className="text-[10px] text-amber-600">
+                  {EXPORT_CODECS[codecId].label} is not supported by this browser — recording{' '}
+                  {selected.label} instead.
+                </p>
+              )}
+            </div>
+
             {isExporting && (
               <div className="space-y-2">
                 <div className="flex justify-between text-xs font-medium text-violet-400">
@@ -1136,21 +1221,6 @@ function ExportTab({
       )}
     </div>
   );
-}
-
-// ── Pick the best available recording format ─────────────────────────────────
-function pickMimeType(): { mimeType: string; ext: string; label: string } {
-  const candidates = [
-    { mimeType: 'video/mp4;codecs=avc1', ext: 'mp4', label: 'MP4 · H.264' },
-    { mimeType: 'video/mp4;codecs=h264', ext: 'mp4', label: 'MP4 · H.264' },
-    { mimeType: 'video/mp4', ext: 'mp4', label: 'MP4' },
-    { mimeType: 'video/webm;codecs=vp9', ext: 'webm', label: 'WebM · VP9' },
-    { mimeType: 'video/webm', ext: 'webm', label: 'WebM' },
-  ];
-  for (const c of candidates) {
-    if (MediaRecorder.isTypeSupported(c.mimeType)) return c;
-  }
-  return { mimeType: 'video/webm', ext: 'webm', label: 'WebM' };
 }
 
 // ── Canvas caption renderer (used during video export recording) ────────────
@@ -1211,6 +1281,7 @@ interface PostProcessingPanelProps {
   captionsEnabled: boolean;
   onCaptionStyleChange: (s: CaptionStyle) => void;
   onCaptionsEnabledChange: (v: boolean) => void;
+  importedThumbnails?: ThumbnailCandidate[];
 }
 
 export function PostProcessingPanel({
@@ -1220,6 +1291,7 @@ export function PostProcessingPanel({
   captionsEnabled,
   onCaptionStyleChange,
   onCaptionsEnabledChange,
+  importedThumbnails = [],
 }: PostProcessingPanelProps) {
   const [activeTab, setActiveTab] = useState<Tab>('description');
 
@@ -1234,7 +1306,13 @@ export function PostProcessingPanel({
   }[] = [
     { id: 'description', label: 'Description', icon: FileText, locked: !hasTranscription },
     { id: 'captions', label: 'Captions', icon: MessageSquare, locked: !hasTranscription },
-    { id: 'thumbnails', label: 'Thumbnails', icon: Image, locked: !hasTranscription || !hasClips },
+    {
+      id: 'thumbnails',
+      label: 'Thumbnails',
+      icon: Image,
+      // Imported images are browsable without AI analysis.
+      locked: (!hasTranscription || !hasClips) && importedThumbnails.length === 0,
+    },
     { id: 'export', label: 'Export', icon: Download, locked: false },
   ];
 
@@ -1308,9 +1386,11 @@ export function PostProcessingPanel({
             />
           )}
           {activeTab === 'thumbnails' && (
-            voiceover
-              ? <ThumbnailsTab voiceover={voiceover} videoClips={videoClips} />
-              : <LockedState message="Upload a voiceover and run AI Auto-Align to generate thumbnails." />
+            <ThumbnailsTab
+              voiceover={voiceover}
+              videoClips={videoClips}
+              importedThumbnails={importedThumbnails}
+            />
           )}
           {activeTab === 'export' && (
             <ExportTab

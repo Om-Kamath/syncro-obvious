@@ -1,5 +1,5 @@
 import React, { useCallback } from 'react';
-import { useDropzone } from 'react-dropzone';
+import { useDropzone, type FileRejection } from 'react-dropzone';
 import { Upload } from 'lucide-react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -10,6 +10,7 @@ function cn(...inputs: ClassValue[]) {
 
 interface FileUploaderProps {
   onFilesAdded: (files: File[]) => void;
+  onRejected?: (files: File[]) => void;
   accept: Record<string, string[]>;
   label: string;
   icon?: React.ReactNode;
@@ -18,14 +19,18 @@ interface FileUploaderProps {
 
 export const FileUploader: React.FC<FileUploaderProps> = ({
   onFilesAdded,
+  onRejected,
   accept,
   label,
   icon = <Upload className="w-8 h-8" />,
   multiple = true,
 }) => {
-  const onDrop = useCallback((acceptedFiles: File[]) => {
+  const onDrop = useCallback((acceptedFiles: File[], fileRejections: FileRejection[]) => {
     onFilesAdded(acceptedFiles);
-  }, [onFilesAdded]);
+    if (onRejected && fileRejections.length > 0) {
+      onRejected(fileRejections.map(rejection => rejection.file));
+    }
+  }, [onFilesAdded, onRejected]);
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
@@ -36,6 +41,7 @@ export const FileUploader: React.FC<FileUploaderProps> = ({
   return (
     <div
       {...getRootProps()}
+      data-media-dropzone="true"
       className={cn(
         "relative group cursor-pointer border-2 border-dashed rounded-2xl p-8 transition-all duration-300",
         "flex flex-col items-center justify-center gap-4 text-center",

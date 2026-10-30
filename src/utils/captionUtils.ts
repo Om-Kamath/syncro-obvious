@@ -1,4 +1,4 @@
-import type { CaptionSegment } from '../types';
+import type { CaptionSegment, Chapter } from '../types';
 
 export type { CaptionSegment };
 
@@ -48,6 +48,31 @@ export function generateVTT(segments: CaptionSegment[], words?: CaptionWord[]): 
     .map(cue => `${toVTTTime(cue.start)} --> ${toVTTTime(cue.end)}\n${cue.text}`)
     .join('\n\n');
   return `WEBVTT\n\n${entries}`;
+}
+
+/**
+ * Formats seconds as a YouTube chapter timestamp: m:ss, or h:mm:ss once the
+ * video passes an hour. YouTube's chapter detection requires this "0:00"
+ * style — no zero-padded minutes and no hour part unless needed.
+ */
+export function formatChapterTime(s: number): string {
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = Math.floor(s % 60);
+  if (h > 0) return `${h}:${pad2(m)}:${pad2(sec)}`;
+  return `${m}:${pad2(sec)}`;
+}
+
+/**
+ * Renders chapters as a YouTube chapters list — one "m:ss label" line per
+ * chapter. YouTube only activates chapters when timestamps are in this style
+ * and appear in order, so sort ascending before formatting.
+ */
+export function generateChaptersTxt(chapters: Chapter[]): string {
+  return [...chapters]
+    .sort((a, b) => a.time - b.time)
+    .map(c => `${formatChapterTime(c.time)} ${c.label.trim()}`)
+    .join('\n');
 }
 
 export function downloadTextFile(content: string, filename: string, mimeType: string): void {

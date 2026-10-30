@@ -1,3 +1,5 @@
+import { estimateCostUsd } from './costModel';
+
 export type LogStatus = 'pending' | 'success' | 'error';
 
 /**
@@ -8,6 +10,12 @@ export type LogStatus = 'pending' | 'success' | 'error';
 export interface FailureCost {
   tokensConsumed: number;
   billed: boolean;
+}
+
+/** Token counts reported by the API for a finished call. */
+export interface LogUsage {
+  inputTokens?: number;
+  outputTokens?: number;
 }
 
 export interface LogEntry {
@@ -21,6 +29,12 @@ export interface LogEntry {
   error?: string;
   tokensConsumed?: number; // set when the call finishes with observed cost state
   billed?: boolean;        // false = the failure cost nothing
+  // Token accounting from the response's usageMetadata (set on success when
+  // the model reports counts). Named for cost math, not the SDK's ids.
+  inputTokens?: number;      // usageMetadata.promptTokenCount
+  outputTokens?: number;     // usageMetadata.candidatesTokenCount
+  totalTokens?: number;      // usageMetadata.totalTokenCount
+  estimatedCostUsd?: number; // derived from tokens + model rate; undefined when unpricable
 }
 
 type Listener = (entries: LogEntry[]) => void;
@@ -52,16 +66,36 @@ export function startLog(fn: string, model: string, detail: string): LogEntry {
   return entry;
 }
 
-export function finishLog(entry: LogEntry, error?: string, cost?: FailureCost) {
+/**
+ * Finalizes a call's entry. `cost` carries the honest failure-cost state and
+ * is set only when provided: a caller re-finishing an entry (e.g. the outer
+ * catch in gemini.ts after the wrapper already recorded cost) must not wipe
+ * the captured state. `usage`, when the caller has token counts, is merged
+ * into the entry; the estimated cost is then derived from whatever token
+ * counts the entry carries — whether passed here or attached by the client
+ * wrapper — so both capture paths price through one site.
+ */
+export function finishLog(entry: LogEntry, error?: string, cost?: FailureCost, usage?: LogUsage) {
+  if (usage) {
+    if (usage.inputTokens !== undefined) entry.inputTokens = usage.inputTokens;
+    if (usage.outputTokens !== undefined) entry.outputTokens = usage.outputTokens;
+  }
   entry.durationMs = Date.now() - entry.timestamp.getTime();
   entry.status = error ? 'error' : 'success';
   if (error) entry.error = error;
-  // Cost is only set when provided: a caller re-finishing an entry (e.g. the
-  // outer catch in gemini.ts after the wrapper already recorded cost) must
-  // not wipe the captured state.
   if (cost) {
     entry.tokensConsumed = cost.tokensConsumed;
     entry.billed = cost.billed;
   }
+  if (entry.estimatedCostUsd === undefined &&
+      (entry.inputTokens !== undefined || entry.outputTokens !== undefined)) {
+    entry.estimatedCostUsd = estimateCostUsd(entry.model, entry.inputTokens, entry.outputTokens);
+  }
+  notify();
+}
+
+/** Clears all entries — test-isolation helper. */
+export function resetLogs() {
+  entries.length = 0;
   notify();
 }
