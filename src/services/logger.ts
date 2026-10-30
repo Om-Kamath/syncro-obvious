@@ -9,6 +9,11 @@ export interface LogEntry {
   detail: string;      // short description of the input
   durationMs?: number; // set on success/error
   error?: string;
+  // Token accounting from the response's usageMetadata (set on success when
+  // the model reports counts). Named for cost math, not the SDK's ids.
+  inputTokens?: number;  // usageMetadata.promptTokenCount
+  outputTokens?: number; // usageMetadata.candidatesTokenCount
+  totalTokens?: number;  // usageMetadata.totalTokenCount
 }
 
 type Listener = (entries: LogEntry[]) => void;
