@@ -71,4 +71,20 @@ test.describe('a11y: axe-core checks', () => {
       expectNoCriticalViolations(await scan(page));
     });
   }
+
+  test('export panel has no color-contrast violations on any tab', async ({ page }) => {
+    await openEditorShell(page);
+    await page.getByRole('button', { name: 'Export' }).click();
+    const panel = page.locator('.fixed.inset-0');
+    await expect(panel.getByText('Export & Post-Processing')).toBeVisible();
+
+    // Scoped to the panel overlay: the app shell behind it carries its own
+    // pre-existing findings tracked separately.
+    for (const tab of ['Description', 'Captions', 'Thumbnails', 'Export']) {
+      await panel.getByRole('button', { name: tab, exact: true }).click();
+      const result = await new AxeBuilder({ page }).include('.fixed.inset-0').analyze();
+      const contrast = result.violations.filter((v) => v.id === 'color-contrast');
+      expect(contrast, `color-contrast violations on "${tab}" tab:\n${summarize(contrast)}`).toEqual([]);
+    }
+  });
 });
