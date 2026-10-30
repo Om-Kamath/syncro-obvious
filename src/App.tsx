@@ -1,8 +1,9 @@
+
 import React, { Suspense, useState, useRef, useEffect, useCallback } from 'react';
 import { VideoClip, Voiceover, CaptionStyle, CaptionSegment, ThumbnailCandidate } from './types';
+import { CaptionOverlay } from './components/CaptionOverlay';
 import { FileUploader } from './components/FileUploader';
 import { MediaDropLayer, type ImportedMedia } from './components/MediaDropLayer';
-import { Toast, type ToastState } from './components/Toast';
 import { Timeline } from './components/Timeline';
 import type { TimelineTransport } from './components/Timeline';
 import { resolveShortcut, getShortcutContext } from './utils/keyboardShortcuts';
@@ -11,6 +12,7 @@ import { ClipEditor } from './components/ClipEditor';
 import { VoiceoverEditor } from './components/VoiceoverEditor';
 import { LogPanel } from './components/LogPanel';
 import { ToastContainer } from './components/ToastContainer';
+import { toast } from './services/toastStore';
 import {
   analyzeVoiceover,
   analyzeVideo,
@@ -37,14 +39,25 @@ import {
   CheckCircle2,
   Activity,
   Key,
+  FolderOpen,
 } from 'lucide-react';
 import { setApiKey, hasApiKey } from './services/apiKey';
 import { chainClips, rippleDeleteMany } from './utils/chainClips';
-import { resolveWordTimings, findActiveWordIndex } from './utils/wordTiming';
+import { DEFAULT_CAPTION_STYLE } from './utils/captionPresets';
 import { captureFilmstrip } from './utils/clipThumbnails';
 import { estimateNarrationFlowCost, estimateTtsCost } from './services/costEstimate';
 import { CostEstimateBadge } from './components/CostEstimateBadge';
 import { motion, AnimatePresence } from 'motion/react';
+import { ProjectSaveModal } from './components/ProjectSaveModal';
+import { RestoreErrorBanner } from './components/RestoreErrorBanner';
+import {
+  deleteProject,
+  listSavedProjects,
+  restoreProject,
+  saveProject,
+  type ClipRestoreError,
+  type SavedProjectSummary,
+} from './services/projectPersistence';
 
 // Heavy Gemini export UI — code-split so it lands in its own chunk and is
 // fetched only on first open of the export modal.
@@ -72,55 +85,6 @@ function attachFilmstrips(
       })
       .catch(err => console.warn(`Filmstrip capture failed for "${clip.name}"`, err));
   }
-}
-
-function CaptionOverlay({
-  segments,
-  currentTime,
-  style,
-}: {
-  segments: CaptionSegment[];
-  currentTime: number;
-  style: CaptionStyle;
-}) {
-  const seg = segments.find(s => currentTime >= s.start && currentTime <= s.end);
-  if (!seg) return null;
-  const baseContainer = cn(
-    'absolute left-0 right-0 px-6 pointer-events-none z-10 flex justify-center',
-    style.position === 'bottom' ? 'bottom-6' : 'top-6'
-  );
-  if (style.mode === 'word-highlight') {
-    const words = resolveWordTimings(seg);
-    const wordIdx = findActiveWordIndex(words, currentTime);
-    return (
-      <div className={baseContainer}>
-        <div className="px-4 py-2 rounded-xl flex flex-wrap gap-x-1.5 gap-y-1 justify-center max-w-2xl"
-          style={{ backgroundColor: style.bgColor, fontSize: `${style.fontSize}px` }}>
-          {words.map((w, i) => (
-            <span key={i} style={{ color: i === wordIdx ? '#7c3aed' : style.color, fontWeight: i === wordIdx ? 700 : 500, transition: 'color 0.1s' }}>{w.word}</span>
-          ))}
-        </div>
-      </div>
-    );
-  }
-  if (style.mode === 'speaker-labeled') {
-    return (
-      <div className={baseContainer}>
-        <div className="px-4 py-2 rounded-xl max-w-2xl" style={{ backgroundColor: style.bgColor, fontSize: `${style.fontSize}px` }}>
-          <span style={{ color: '#7c3aed', fontWeight: 700, marginRight: '8px' }}>Speaker:</span>
-          <span style={{ color: style.color }}>{seg.text}</span>
-        </div>
-      </div>
-    );
-  }
-  return (
-    <div className={baseContainer}>
-      <div className="px-5 py-2.5 rounded-xl max-w-2xl text-center"
-        style={{ backgroundColor: style.bgColor, color: style.color, fontSize: `${style.fontSize}px`, fontWeight: 600 }}>
-        {seg.text}
-      </div>
-    </div>
-  );
 }
 
 type VoiceoverMethod = 'upload' | 'script' | 'auto';
@@ -311,16 +275,22 @@ export default function App() {
   const [editingClipId, setEditingClipId] = useState<string | null>(null);
   const [showVoiceoverEditor, setShowVoiceoverEditor] = useState(false);
   const [captionsEnabled, setCaptionsEnabled] = useState(false);
-  const [captionStyle, setCaptionStyle] = useState<CaptionStyle>({
-    mode: 'lower-third', fontSize: 16, color: '#ffffff', bgColor: '#000000', position: 'bottom',
-  });
+  const [captionStyle, setCaptionStyle] = useState<CaptionStyle>(DEFAULT_CAPTION_STYLE);
   const [onboardingStep, setOnboardingStep] = useState<1 | 2 | null>(1);
   const [showExportModal, setShowExportModal] = useState(false);
   const [showLogs, setShowLogs] = useState(false);
   const [showApiKeyModal, setShowApiKeyModal] = useState(!hasApiKey());
   const [apiKeyInput, setApiKeyInput] = useState('');
-  const [toast, setToast] = useState<ToastState | null>(null);
   const [importedThumbnails, setImportedThumbnails] = useState<ThumbnailCandidate[]>([]);
+  const [showProjectModal, setShowProjectModal] = useState(false);
+  const [isSavingProject, setIsSavingProject] = useState(false);
+  const [isRestoringProject, setIsRestoringProject] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [projectListError, setProjectListError] = useState<string | null>(null);
+  const [savedProjects, setSavedProjects] = useState<SavedProjectSummary[]>([]);
+  const [restoreErrors, setRestoreErrors] = useState<ClipRestoreError[]>([]);
+  const [restoreVoiceoverError, setRestoreVoiceoverError] = useState<string | null>(null);
+  const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
   const videoRefs = useRef<Record<string, HTMLVideoElement>>({});
   const transportRef = useRef<TimelineTransport | null>(null);
   const [previewHeight, setPreviewHeight] = useState(260);
@@ -420,20 +390,18 @@ export default function App() {
     replaceVoiceover({ file, url, duration });
   };
 
-  const showToast = (kind: ToastState['kind'], message: string) => setToast({ kind, message });
-
   const describeFiles = (files: File[]) => files.map(f => `"${f.name}"`).join(', ');
 
   const handleAppDropImport = ({ videos, audios, images }: ImportedMedia) => {
     if (videos.length > 0) {
       void handleVideoUpload(videos)
-        .then(() => showToast('success', `Imported ${videos.length} video${videos.length > 1 ? 's' : ''}`))
-        .catch(() => showToast('error', 'Failed to import videos'));
+        .then(() => toast.success(`Imported ${videos.length} video${videos.length > 1 ? 's' : ''}`))
+        .catch(() => toast.error('Failed to import videos'));
     }
     if (audios.length > 0) {
       void handleVoiceoverUpload(audios)
-        .then(() => showToast('success', `Voiceover set to "${audios[0].name}"`))
-        .catch(() => showToast('error', 'Failed to import voiceover'));
+        .then(() => toast.success(`Voiceover set to "${audios[0].name}"`))
+        .catch(() => toast.error('Failed to import voiceover'));
     }
     if (images.length > 0) {
       const candidates: ThumbnailCandidate[] = images.map(file => ({
@@ -445,16 +413,16 @@ export default function App() {
         source: 'imported' as const,
       }));
       setImportedThumbnails(prev => [...prev, ...candidates]);
-      showToast('success', `Imported ${images.length} image${images.length > 1 ? 's' : ''} — available in Export → Thumbnails`);
+      toast.success(`Imported ${images.length} image${images.length > 1 ? 's' : ''} — available in Export → Thumbnails`);
     }
   };
 
   const handleAppDropRejected = (files: File[]) => {
-    showToast('error', `Unsupported file type: ${describeFiles(files)}. Drop video, audio, or image files.`);
+    toast.error(`Unsupported file type: ${describeFiles(files)}. Drop video, audio, or image files.`);
   };
 
   const rejectNonVideos = (files: File[]) => {
-    showToast('error', `Unsupported file type: ${describeFiles(files)}. The video uploader accepts video files.`);
+    toast.error(`Unsupported file type: ${describeFiles(files)}. The video uploader accepts video files.`);
   };
 
   const handleGenerateFromScript = async (script: string, voice: string) => {
@@ -462,10 +430,10 @@ export default function App() {
     try {
       const result = await generateAudioFromScript(script, voice);
       replaceVoiceover({ url: result.url, duration: result.duration, transcription: result.transcription });
-      showToast('success', 'Voiceover audio generated');
+      toast.success('Voiceover audio generated');
     } catch (err) {
       console.error('TTS generation failed:', err);
-      showToast('error', `Failed to generate audio: ${err instanceof Error ? err.message : String(err)}`);
+      toast.error(`Failed to generate audio: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       setIsGeneratingAudio(false);
     }
@@ -484,10 +452,10 @@ export default function App() {
         updatedClips.map(c => ({ name: c.name, analysis: c.analysis ?? '', duration: c.duration })), voice
       );
       replaceVoiceover({ url: result.url, duration: result.duration, transcription: result.transcription });
-      showToast('success', 'Narration voiceover generated');
+      toast.success('Narration voiceover generated');
     } catch (err) {
       console.error('Narration generation failed:', err);
-      showToast('error', `Failed to generate narration: ${err instanceof Error ? err.message : String(err)}`);
+      toast.error(`Failed to generate narration: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       setIsGeneratingAudio(false);
     }
@@ -544,7 +512,7 @@ export default function App() {
       setVideoClips(chainClips(orderedClips));
     } catch (error) {
       console.error('Alignment failed:', error);
-      showToast('error', 'Failed to align clips. Please try again.');
+      toast.error('Failed to align clips. Please try again.');
     } finally {
       setIsAligning(false);
     }
@@ -601,6 +569,84 @@ export default function App() {
   const handleOnboardingNext = () => { if (onboardingStep === 1) setOnboardingStep(2); else setOnboardingStep(null); };
   const editingClip = videoClips.find(c => c.id === editingClipId) ?? null;
 
+  const refreshSavedProjects = () => {
+    try {
+      setSavedProjects(listSavedProjects());
+      setProjectListError(null);
+    } catch (err) {
+      setProjectListError(err instanceof Error ? err.message : 'Could not load saved projects.');
+    }
+  };
+
+  const handleOpenProjectModal = () => {
+    refreshSavedProjects();
+    setShowProjectModal(true);
+  };
+
+  const handleSaveProject = async (name: string) => {
+    setIsSavingProject(true);
+    setSaveError(null);
+    try {
+      const result = await saveProject({
+        name,
+        projectId: activeProjectId ?? undefined,
+        clips: videoClips,
+        voiceover,
+        captionStyle,
+        captionsEnabled,
+      });
+      setActiveProjectId(result.record.id);
+      // Adopt the persisted media ids on the live clips so re-saving skips
+      // already-uploaded blobs instead of duplicating them server-side.
+      setVideoClips(prev => prev.map(clip => {
+        const serialized = result.record.project.clips.find(sc => sc.id === clip.id);
+        return serialized?.mediaId && !clip.mediaId ? { ...clip, mediaId: serialized.mediaId } : clip;
+      }));
+      if (voiceover && !voiceover.mediaId) {
+        const savedVoiceoverId = result.record.project.voiceover?.mediaId;
+        if (savedVoiceoverId) replaceVoiceover({ ...voiceover, mediaId: savedVoiceoverId });
+      }
+      refreshSavedProjects();
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : 'Could not save the project.');
+    } finally {
+      setIsSavingProject(false);
+    }
+  };
+
+  const handleLoadProject = async (id: string) => {
+    setIsRestoringProject(true);
+    try {
+      const result = await restoreProject(id);
+      setVideoClips(chainClips(result.clips));
+      replaceVoiceover(result.voiceover);
+      setCaptionStyle(result.captionStyle);
+      setCaptionsEnabled(result.captionsEnabled);
+      setRestoreErrors(result.clipErrors);
+      setRestoreVoiceoverError(result.voiceoverError);
+      setActiveProjectId(id);
+      setCurrentTime(0);
+      setOnboardingStep(null);
+      setShowProjectModal(false);
+      setSaveError(null);
+    } catch (err) {
+      setProjectListError(err instanceof Error ? err.message : 'Could not open the project.');
+    } finally {
+      setIsRestoringProject(false);
+    }
+  };
+
+  const handleDeleteProject = (id: string) => {
+    deleteProject(id);
+    refreshSavedProjects();
+    if (activeProjectId === id) setActiveProjectId(null);
+  };
+
+  const handleDismissRestoreErrors = () => {
+    setRestoreErrors([]);
+    setRestoreVoiceoverError(null);
+  };
+
   return (
     <div className="min-h-screen bg-[#F5F5F7] text-gray-900 font-sans">
       <AnimatePresence>
@@ -654,10 +700,16 @@ export default function App() {
             <Key className="w-4 h-4" />
           </button>
           {onboardingStep === null && (
-            <button onClick={() => setOnboardingStep(1)}
-              className="px-4 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-600 text-xs font-semibold rounded-full transition-colors">
-              + New Project
-            </button>
+            <>
+              <button onClick={handleOpenProjectModal}
+                className="flex items-center gap-1.5 px-4 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-600 text-xs font-semibold rounded-full transition-colors">
+                <FolderOpen className="w-3.5 h-3.5" /> Projects
+              </button>
+              <button onClick={() => setOnboardingStep(1)}
+                className="px-4 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-600 text-xs font-semibold rounded-full transition-colors">
+                + New Project
+              </button>
+            </>
           )}
           <button
             onClick={() => setShowExportModal(true)}
@@ -668,6 +720,11 @@ export default function App() {
       </header>
 
       <main className="p-6 max-w-[1600px] mx-auto grid grid-cols-12 gap-6">
+        <RestoreErrorBanner
+          errors={restoreErrors}
+          voiceoverError={restoreVoiceoverError}
+          onDismiss={handleDismissRestoreErrors}
+        />
         <div className="col-span-3 space-y-5">
           <section className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
             <div className="px-5 py-4 border-b border-gray-50 flex items-center justify-between">
@@ -935,6 +992,21 @@ export default function App() {
         )}
       </AnimatePresence>
 
+      {showProjectModal && (
+        <ProjectSaveModal
+          projects={savedProjects}
+          isSaving={isSavingProject}
+          isRestoring={isRestoringProject}
+          saveError={saveError}
+          loadError={projectListError}
+          onSave={handleSaveProject}
+          onLoad={handleLoadProject}
+          onDelete={handleDeleteProject}
+          onDismissError={() => setProjectListError(null)}
+          onClose={() => { setShowProjectModal(false); setSaveError(null); setProjectListError(null); }}
+        />
+      )}
+
       {/* API Key Modal */}
       <AnimatePresence>
         {showApiKeyModal && (
@@ -997,7 +1069,6 @@ export default function App() {
       </AnimatePresence>
 
       <MediaDropLayer onImport={handleAppDropImport} onRejected={handleAppDropRejected} />
-      {toast && <Toast toast={toast} onDismiss={() => setToast(null)} />}
     </div>
   );
 }
