@@ -735,8 +735,8 @@ export default function App() {
           <button
             onClick={() => projectImportInputRef.current?.click()}
             disabled={isExportingProject || isImportingProject}
-            title="Import project (.zip)"
-            aria-label="Import project (.zip)"
+            title="Open project archive (.zip)"
+            aria-label="Open project archive (.zip)"
             className="p-2 rounded-full text-gray-400 hover:text-violet-600 hover:bg-violet-50 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
           >
             {isImportingProject ? <Loader2 className="w-4 h-4 animate-spin" /> : <FolderInput className="w-4 h-4" />}
@@ -744,8 +744,8 @@ export default function App() {
           <button
             onClick={handleExportProjectZip}
             disabled={isExportingProject || isImportingProject || (videoClips.length === 0 && !voiceover)}
-            title={videoClips.length === 0 && !voiceover ? 'Add clips or a voiceover to export a project' : 'Export project (.zip)'}
-            aria-label="Export project (.zip)"
+            title={videoClips.length === 0 && !voiceover ? 'Add clips or a voiceover to save a project archive' : 'Download project archive (.zip)'}
+            aria-label="Download project archive (.zip)"
             className="p-2 rounded-full text-gray-400 hover:text-violet-600 hover:bg-violet-50 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
           >
             {isExportingProject ? <Loader2 className="w-4 h-4 animate-spin" /> : <FolderDown className="w-4 h-4" />}
