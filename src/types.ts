@@ -16,6 +16,7 @@ export interface VideoClip {
   track?: number;           // video track layer (0 = default, stacks vertically)
   transitionIn?: TransitionType; // transition from the previous clip into this one
   alternatives?: Array<{ id: string; confidence: number; reason: string }>; // AI-suggested alternative clips for this position
+  thumbnails?: string[];    // filmstrip JPEG data URLs sampled at import (timeline background)
 }
 
 export interface Voiceover {

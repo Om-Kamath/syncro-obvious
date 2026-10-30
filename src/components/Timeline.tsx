@@ -633,6 +633,7 @@ export const Timeline: React.FC<TimelineProps> = ({
                         const isActive = currentTime >= clip.startTime && currentTime < clip.startTime + effectiveDuration;
                         const isDragging = draggingClipId === clip.id;
                         const isTrimDragging = draggingTrimId === clip.id;
+                        const hasFilmstrip = (clip.thumbnails?.length ?? 0) > 0;
 
                         return (
                           <React.Fragment key={clip.id}>
@@ -663,12 +664,23 @@ export const Timeline: React.FC<TimelineProps> = ({
                               )}
                               style={{ left: `${clip.startTime * pixelsPerSecond}px`, width: `${effectiveDuration * pixelsPerSecond}px`, zIndex: isDragging ? 100 : 2 }}
                             >
+                              {/* Filmstrip background — sampled frames spanning the clip's full duration */}
+                              {clip.thumbnails && clip.thumbnails.length > 0 && (
+                                <div aria-hidden="true" className="pointer-events-none absolute inset-0 flex overflow-hidden rounded-xl">
+                                  {clip.thumbnails.map((src, i) => (
+                                    <img key={i} src={src} alt="" className="h-full min-w-0 flex-1 object-cover" />
+                                  ))}
+                                  {/* Scrim keeps the clip name readable over arbitrary frame content */}
+                                  <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/40 to-black/20" />
+                                </div>
+                              )}
                               {/* Audio waveform underlay — silent/undecodable media renders nothing.
                                   Sized to the full source duration and shifted by trimStart so the
-                                  visible slice matches what the clip plays. Negative z keeps it
-                                  above the block background but below labels; the block always sets
-                                  a zIndex, so it forms a stacking context. */}
-                              <div aria-hidden="true" className="absolute inset-0 -z-10 overflow-hidden rounded-xl pointer-events-none opacity-50">
+                                  visible slice matches what the clip plays. Painted above a filmstrip
+                                  when both exist (equal stacking, later DOM order wins), and below
+                                  the z-10 labels; the block always sets a zIndex, so it forms a
+                                  stacking context. */}
+                              <div aria-hidden="true" className="absolute inset-0 overflow-hidden rounded-xl pointer-events-none opacity-50">
                                 <div
                                   className="absolute top-0 bottom-0"
                                   style={{ width: `${clip.duration * pixelsPerSecond}px`, left: `-${(clip.trimStart ?? 0) * pixelsPerSecond}px` }}
@@ -693,18 +705,18 @@ export const Timeline: React.FC<TimelineProps> = ({
                                 <div className="w-0.5 h-4 bg-white/70 rounded-full" />
                               </div>
 
-                              <div className="flex items-center gap-2 overflow-hidden">
-                                <Video className="w-3.5 h-3.5 shrink-0" style={{ color: isActive ? 'white' : '#7c3aed' }} />
-                                <span className="text-xs font-medium truncate" style={{ color: isActive ? 'white' : '#5b21b6' }}>{clip.name}</span>
+                              <div className="relative z-10 flex items-center gap-2 overflow-hidden">
+                                <Video className="w-3.5 h-3.5 shrink-0" style={{ color: isActive || hasFilmstrip ? 'white' : '#7c3aed' }} />
+                                <span className="text-xs font-medium truncate" style={{ color: isActive || hasFilmstrip ? 'white' : '#5b21b6' }}>{clip.name}</span>
                               </div>
                               {(clip.trimmedDuration !== undefined || clip.trimStart !== undefined) && (
-                                <div className="flex items-center gap-1 mt-0.5">
+                                <div className="relative z-10 flex items-center gap-1 mt-0.5">
                                   <Scissors className="w-3 h-3 text-orange-400 shrink-0" />
                                   <span className="text-[10px] text-orange-400 font-medium">{effectiveDuration.toFixed(1)}s</span>
                                 </div>
                               )}
                               {clip.analysis && clip.trimmedDuration === undefined && clip.trimStart === undefined && (
-                                <div className="text-[10px] truncate mt-0.5 italic" style={{ color: isActive ? 'rgba(255,255,255,0.7)' : '#8b5cf6' }}>{clip.analysis}</div>
+                                <div className="relative z-10 text-[10px] truncate mt-0.5 italic" style={{ color: isActive || hasFilmstrip ? 'rgba(255,255,255,0.7)' : '#8b5cf6' }}>{clip.analysis}</div>
                               )}
 
                               {/* Right trim */}
