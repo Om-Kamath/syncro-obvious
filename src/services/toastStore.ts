@@ -12,6 +12,10 @@ export interface Toast {
 
 export const DEFAULT_TOAST_DURATION_MS = 5000;
 
+// Visible-stack cap: a burst of failures (e.g. several AI calls failing
+// together) must not pile up unbounded — the oldest toast is evicted first.
+export const MAX_VISIBLE_TOASTS = 3;
+
 type Listener = (toasts: Toast[]) => void;
 
 const toasts: Toast[] = [];
@@ -57,6 +61,12 @@ export function pushToast(kind: ToastKind, message: string, durationMs: number =
   const toast: Toast = { id: `toast-${++nextId}`, kind, message, durationMs };
   toasts.unshift(toast); // newest first, matching the log panel's ordering
   armExpiry(toast);
+  // Enforce the visible-stack cap by evicting the oldest toast (end of the
+  // newest-first array) — its expiry timer is cancelled so it cannot notify.
+  while (toasts.length > MAX_VISIBLE_TOASTS) {
+    const oldest = toasts.pop();
+    if (oldest) cancelExpiry(oldest.id);
+  }
   notify();
   return toast;
 }
