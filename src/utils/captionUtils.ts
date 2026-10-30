@@ -1,4 +1,4 @@
-import type { CaptionSegment } from '../types';
+import type { CaptionSegment, Chapter } from '../types';
 
 export type { CaptionSegment };
 
