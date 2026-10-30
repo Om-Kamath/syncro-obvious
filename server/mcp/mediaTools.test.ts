@@ -402,13 +402,13 @@ describe('attach_media', () => {
 });
 
 describe('tool registry', () => {
-  it('lists both media tools with schemas', async () => {
+  it('lists the project read tools and media tools with schemas', async () => {
     const mock = mockFetch(() => uploadResponse('med-x'));
     const client = await connectTools(mock.fetch);
     const { tools } = await client.listTools();
 
     const names = tools.map((tool) => tool.name).sort();
-    expect(names).toEqual(['attach_media', 'upload_media']);
+    expect(names).toEqual(['attach_media', 'get_project', 'list_projects', 'upload_media']);
     for (const tool of tools) {
       expect(tool.inputSchema.type).toBe('object');
     }

@@ -28,6 +28,9 @@ A narration-first video editor in the browser: import clips, generate narration 
 | `npm run preview` | Preview the production build |
 | `npm test` | Run Vitest tests |
 | `npm run lint` | Type-check (`tsc --noEmit`) + ESLint |
+| `npm run lint:eslint` | ESLint only |
+| `npm run typecheck` | Type-check only (`tsc --noEmit`) |
+| `npm run test:e2e` | Playwright e2e suite (Chromium; starts the dev server on :3000) |
 | `npm run clean` | Remove `dist/` |
 
 ## Media API
@@ -43,3 +46,24 @@ The API server (port 3001) stores uploaded media blobs on disk:
 Configuration: `SYNCRO_MEDIA_DIR` (blob directory, default `data/media`) and
 `SYNCRO_MAX_UPLOAD_BYTES` (default 536870912 = 512 MiB). Both can also be passed per app
 instance through `createApp` options.
+
+## CI
+
+Every push and PR runs four checks in parallel, one job each in
+`.github/workflows/ci.yml`:
+
+| Check | What it runs |
+| --- | --- |
+| `lint` | ESLint (`npm run lint:eslint`) |
+| `typecheck` | `tsc --noEmit` (`npm run typecheck`) |
+| `unit` | Vitest suite with v8 coverage + production build |
+| `e2e` | Playwright smoke suite in Chromium (`npm run test:e2e`) |
+
+A fifth job, `gate`, passes only when all four pass — and it reports even when
+one of them fails or is cancelled, so it can never silently go missing. On a
+new push to the same branch, the superseded run is cancelled immediately.
+
+Branch protection on `main` should require only the `gate` check: adding,
+removing, or renaming a job then never needs a settings change. To list the
+individual checks as required too, mark `lint`, `typecheck`, `unit`, `e2e`, and
+`gate` all required.

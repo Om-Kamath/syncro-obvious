@@ -27,6 +27,7 @@ function PresetHarness({ onStyleChange }: { onStyleChange: (s: CaptionStyle) => 
       captionsEnabled
       onStyleChange={s => { setStyle(s); onStyleChange(s); }}
       onEnabledChange={() => {}}
+      onImportCaptions={() => {}}
     />
   );
 }

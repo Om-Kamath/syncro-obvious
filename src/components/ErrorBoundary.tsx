@@ -1,4 +1,5 @@
 import { Component, type ErrorInfo, type ReactNode } from 'react';
+import { Sparkles } from 'lucide-react';
 
 interface ErrorBoundaryProps {
   children: ReactNode;
@@ -27,9 +28,15 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
     if (!this.state.error) return this.props.children;
 
     return (
-      <div className="flex flex-col items-center justify-center min-h-screen bg-gray-50 gap-4 p-6 text-center">
-        <div className="w-12 h-12 bg-red-100 rounded-full flex items-center justify-center text-xl">
-          !
+      <div role="alert" className="flex flex-col items-center justify-center min-h-screen bg-gray-50 gap-4 p-6 text-center">
+        <div aria-hidden="true" className="flex items-center gap-3">
+          <div className="w-10 h-10 bg-violet-600 rounded-xl flex items-center justify-center text-white shadow-md shadow-violet-200">
+            <Sparkles className="w-5 h-5" />
+          </div>
+          <div className="text-left">
+            <p className="text-base font-bold tracking-tight text-gray-900 leading-none">Syncro</p>
+            <p className="text-[9px] text-gray-400 uppercase tracking-widest font-semibold mt-0.5">Video Editing Copilot</p>
+          </div>
         </div>
         <h1 className="text-lg font-semibold text-gray-900">Something went wrong</h1>
         <p className="text-sm text-gray-500 max-w-md">

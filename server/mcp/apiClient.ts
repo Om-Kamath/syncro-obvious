@@ -170,6 +170,15 @@ export class SyncroApiClient {
     return asset;
   }
 
+  async listProjects(): Promise<ProjectRecord[]> {
+    const response = await this.fetchImpl(`${this.baseUrl}/api/projects`);
+    const body = await assertOk(response);
+    if (!Array.isArray(body)) {
+      throw new SyncroApiError(500, 'Syncro server returned a malformed project list');
+    }
+    return body.map(toProjectRecord);
+  }
+
   async getProject(id: string): Promise<ProjectRecord> {
     const response = await this.fetchImpl(`${this.baseUrl}/api/projects/${encodeURIComponent(id)}`);
     const body = await assertOk(response);

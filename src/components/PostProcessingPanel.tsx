@@ -7,6 +7,7 @@ import {
   MessageSquare,
   Image,
   Download,
+  Upload,
   Wand2,
   Copy,
   Check,
@@ -21,17 +22,28 @@ import {
   Trash2,
 } from 'lucide-react';
 import { VideoClip, Voiceover, CaptionStyle, CaptionMode, VideoDescription, ThumbnailCandidate } from '../types';
-import { generateDescription, identifyKeyMoments } from '../services/postProcessing';
+// Heavy export-only dependencies (Gemini post-processing, canvas frame capture) are
+// loaded on demand via dynamic import so they stay out of the initial bundle.
+// captionUtils stays static: a ~1 kB string-formatting module that render paths need
+// synchronously (chapter/thumbnail timestamps) — same trade as exportPresets below.
 import { normalizeErrorMessage } from '../services/geminiClient';
-import { generateSRT, generateVTT, downloadTextFile, generateChaptersTxt, formatChapterTime } from '../utils/captionUtils';
+import { generateSRT, generateVTT, downloadTextFile, generateChaptersTxt, formatChapterTime, type CaptionSegment } from '../utils/captionUtils';
 import { CAPTION_PRESETS, CAPTION_PRESET_ORDER, applyPreset } from '../utils/captionPresets';
 import { listTemplates, saveTemplate, deleteTemplate, applyTemplate, loadTemplatesResult } from '../services/captionTemplates';
+import { parseCaptionFile, segmentsToTranscription } from '../utils/captionImport';
 import type { CaptionTemplate } from '../types';
-import { captureVideoFrame, addQuoteOverlay, downloadDataUrl, downloadFile, getClipAtTime } from '../utils/exportUtils';
 import { EXPORT_PRESETS, DEFAULT_EXPORT_PRESET, computeDrawGeometry, type ExportPresetId } from '../utils/exportPresets';
 import { audioChannelsOf, mixAudio, sliceAudioWindow, toAudioBuffer } from '../utils/audioMix';
 import { MusicPanel, DEFAULT_MUSIC_VOLUME } from './MusicPanel';
 import { EXPORT_CODECS, DEFAULT_EXPORT_CODEC, selectMimeType, type ExportCodecId } from '../utils/exportCodecs';
+import {
+  QUALITY_PRESETS,
+  DEFAULT_QUALITY_PRESET,
+  computeExportDuration,
+  estimatePresetSizeBytes,
+  formatEstimatedSize,
+  type QualityPresetId,
+} from '../utils/qualityPresets';
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -130,6 +142,7 @@ export function DescriptionTab({ voiceover, videoClips }: { voiceover: Voiceover
     setIsGenerating(true);
     setError('');
     try {
+      const { generateDescription } = await import('../services/postProcessing');
       const result = await generateDescription(
         voiceover.transcription,
         voiceover.segments,
@@ -307,14 +320,18 @@ export function CaptionsTab({
   captionsEnabled,
   onStyleChange,
   onEnabledChange,
+  onImportCaptions,
 }: {
   voiceover: Voiceover | null;
   captionStyle: CaptionStyle;
   captionsEnabled: boolean;
   onStyleChange: (s: CaptionStyle) => void;
   onEnabledChange: (v: boolean) => void;
+  onImportCaptions: (segments: CaptionSegment[], transcription: string) => void;
 }) {
   const hasSegments = !!voiceover?.segments?.length;
+  const [importStatus, setImportStatus] = useState<{ kind: 'ok' | 'error'; message: string } | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   // Manual tweaks take the style off its named preset, so the picker stops
   // highlighting it instead of lying about the active look.
@@ -363,13 +380,40 @@ export function CaptionsTab({
   ];
 
   const handleDownloadSRT = () => {
-    if (!voiceover?.segments) return;
-    downloadTextFile(generateSRT(voiceover.segments), 'captions.srt', 'text/plain');
+    const segments = voiceover?.segments;
+    if (!segments) return;
+    downloadTextFile(generateSRT(segments), 'captions.srt', 'text/plain');
   };
 
   const handleDownloadVTT = () => {
-    if (!voiceover?.segments) return;
-    downloadTextFile(generateVTT(voiceover.segments), 'captions.vtt', 'text/vtt');
+    const segments = voiceover?.segments;
+    if (!segments) return;
+    downloadTextFile(generateVTT(segments), 'captions.vtt', 'text/vtt');
+  };
+
+  const handleImportFile = async (file: File) => {
+    setImportStatus(null);
+    try {
+      const { segments, errors } = parseCaptionFile(await file.text());
+      if (segments.length === 0) {
+        setImportStatus({
+          kind: 'error',
+          message: `No valid cues found in "${file.name}".${errors[0] ? ` First issue: ${errors[0]}` : ''}`,
+        });
+        return;
+      }
+      // The imported cues replace the AI transcription wholesale, so downstream
+      // consumers (description, thumbnails) read the imported text.
+      onImportCaptions(segments, segmentsToTranscription(segments));
+      setImportStatus({
+        kind: 'ok',
+        message:
+          `Imported ${segments.length} cue${segments.length === 1 ? '' : 's'} from "${file.name}" — captions now use these timings.` +
+          (errors.length ? ` ${errors.length} malformed cue${errors.length === 1 ? '' : 's'} skipped.` : ''),
+      });
+    } catch (err) {
+      setImportStatus({ kind: 'error', message: `Failed to read "${file.name}": ${err instanceof Error ? err.message : String(err)}` });
+    }
   };
 
   if (!hasSegments) {
@@ -587,6 +631,38 @@ export function CaptionsTab({
         )}
       </div>
 
+      {/* Import */}
+      <div className="pt-2 border-t border-gray-100">
+        <p className="text-xs font-bold uppercase tracking-widest text-violet-500 mb-3">Import Captions</p>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".srt,.vtt"
+          className="hidden"
+          aria-label="Import caption file"
+          onChange={e => {
+            const file = e.target.files?.[0];
+            if (file) void handleImportFile(file);
+            e.target.value = '';
+          }}
+        />
+        <button
+          onClick={() => fileInputRef.current?.click()}
+          className="flex items-center gap-2 px-4 py-2.5 text-xs font-semibold bg-gray-50 border border-gray-200 text-violet-600 rounded-xl hover:border-violet-400 hover:bg-violet-50 transition-all"
+        >
+          <Upload className="w-3.5 h-3.5" />
+          Import SRT / VTT
+        </button>
+        <p className="mt-2 text-[11px] text-gray-400">
+          Replaces the AI transcription and caption timings with the cues from the file.
+        </p>
+        {importStatus && (
+          <p aria-live="polite" className={cn('mt-2 text-[11px] font-medium', importStatus.kind === 'ok' ? 'text-emerald-600' : 'text-red-600')}>
+            {importStatus.message}
+          </p>
+        )}
+      </div>
+
       {/* Download */}
       <div className="pt-2 border-t border-gray-100">
         <p className="text-xs font-bold uppercase tracking-widest text-violet-500 mb-3">Export Caption File</p>
@@ -639,6 +715,8 @@ export function ThumbnailsTab({
     setProgress('Asking AI to identify key moments…');
     setThumbnails([]);
     try {
+      const [{ identifyKeyMoments }, { getClipAtTime, captureVideoFrame, addQuoteOverlay }] =
+        await Promise.all([import('../services/postProcessing'), import('../utils/exportUtils')]);
       const moments = await identifyKeyMoments(
         voiceover.transcription,
         voiceover.segments,
@@ -785,14 +863,15 @@ function ThumbnailGrid({ items }: { items: ThumbnailCandidate[] }) {
                 <p className="text-xs font-semibold text-gray-900 line-clamp-1">"{thumb.quote}"</p>
                 <p className="text-[10px] text-violet-500 line-clamp-2">{thumb.reason}</p>
                 <button
-                  onClick={() =>
+                  onClick={async () => {
+                    const { downloadDataUrl } = await import('../utils/exportUtils');
                     downloadDataUrl(
                       thumb.imageDataUrl,
                       thumb.source === 'imported'
                         ? thumb.quote
                         : `thumbnail-${i + 1}-${thumb.timestamp}s.jpg`
-                    )
-                  }
+                    );
+                  }}
                   className="flex items-center gap-1.5 w-full justify-center py-1.5 text-xs font-semibold bg-gray-100 border border-gray-200 text-violet-400 rounded-lg hover:bg-violet-50 hover:text-violet-600 hover:border-violet-400 transition-all"
                 >
                   <Download className="w-3.5 h-3.5" />
@@ -836,6 +915,8 @@ function ExportTab({
     codecId,
     m => typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported(m)
   );
+  const [qualityId, setQualityId] = useState<QualityPresetId>(DEFAULT_QUALITY_PRESET);
+  const quality = QUALITY_PRESETS[qualityId];
   const stopRef = useRef<(() => void) | null>(null);
 
   const handleDownloadAsset = (url: string, name: string) => {
@@ -846,13 +927,15 @@ function ExportTab({
   };
 
   const handleDownloadSRT = () => {
-    if (!voiceover?.segments) return;
-    downloadTextFile(generateSRT(voiceover.segments), 'captions.srt', 'text/plain');
+    const segments = voiceover?.segments;
+    if (!segments) return;
+    downloadTextFile(generateSRT(segments), 'captions.srt', 'text/plain');
   };
 
   const handleDownloadVTT = () => {
-    if (!voiceover?.segments) return;
-    downloadTextFile(generateVTT(voiceover.segments), 'captions.vtt', 'text/vtt');
+    const segments = voiceover?.segments;
+    if (!segments) return;
+    downloadTextFile(generateVTT(segments), 'captions.vtt', 'text/vtt');
   };
 
   const handleExportVideo = async () => {
@@ -863,6 +946,8 @@ function ExportTab({
 
     let audioCtx: AudioContext | null = null;
     try {
+      // Chunk is fetched once here; the draw loop and recorder.onstop close over the bindings.
+      const { downloadFile, getClipAtTime } = await import('../utils/exportUtils');
       const W = preset.width;
       const H = preset.height;
       const canvas = document.createElement('canvas');
@@ -926,7 +1011,11 @@ function ExportTab({
       ]);
 
       const { mimeType, ext } = selected;
-      const recorder = new MediaRecorder(combined, { mimeType });
+      const recorderOptions: MediaRecorderOptions = { mimeType };
+      if (quality.videoBitsPerSecond !== null) {
+        recorderOptions.videoBitsPerSecond = quality.videoBitsPerSecond;
+      }
+      const recorder = new MediaRecorder(combined, recorderOptions);
       const chunks: Blob[] = [];
       recorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
       recorder.onstop = () => {
@@ -1002,6 +1091,15 @@ function ExportTab({
   if (!hasContent) {
     return <LockedState message="Upload assets and run AI Auto-Align before exporting." />;
   }
+
+  const exportDuration = voiceover ? computeExportDuration(voiceover) : 0;
+  const estimatedSize = exportDuration > 0 ? estimatePresetSizeBytes(quality, exportDuration) : null;
+  const sizeNote =
+    estimatedSize !== null && quality.videoBitsPerSecond !== null
+      ? `Estimated size ≈ ${formatEstimatedSize(estimatedSize)} · ${exportDuration.toFixed(1)}s · ${(quality.videoBitsPerSecond / 1_000_000).toFixed(1)} Mbps video`
+      : quality.videoBitsPerSecond === null
+        ? 'Bitrate: browser-managed — size estimate unavailable'
+        : null;
 
   return (
     <div className="space-y-6">
@@ -1178,6 +1276,31 @@ function ExportTab({
               )}
             </div>
 
+            <div className="space-y-2">
+              <p className="text-xs font-semibold text-gray-900">Quality</p>
+              <div className="grid grid-cols-4 gap-2">
+                {Object.values(QUALITY_PRESETS).map(q => (
+                  <button
+                    key={q.id}
+                    onClick={() => setQualityId(q.id)}
+                    disabled={isExporting}
+                    className={cn(
+                      'flex flex-col items-center gap-0.5 px-2 py-2 rounded-xl border text-xs font-semibold transition-all disabled:opacity-50',
+                      qualityId === q.id
+                        ? 'bg-violet-50 border-violet-400 text-violet-600'
+                        : 'bg-white border-gray-200 text-gray-600 hover:border-violet-300'
+                    )}
+                  >
+                    <span>{q.label}</span>
+                    <span className="text-[10px] font-normal text-gray-400 text-center leading-tight">
+                      {q.description}
+                    </span>
+                  </button>
+                ))}
+              </div>
+              {sizeNote && <p className="text-[10px] text-gray-400">{sizeNote}</p>}
+            </div>
+
             {isExporting && (
               <div className="space-y-2">
                 <div className="flex justify-between text-xs font-medium text-violet-400">
@@ -1282,6 +1405,7 @@ interface PostProcessingPanelProps {
   onCaptionStyleChange: (s: CaptionStyle) => void;
   onCaptionsEnabledChange: (v: boolean) => void;
   importedThumbnails?: ThumbnailCandidate[];
+  onImportCaptions: (segments: CaptionSegment[], transcription: string) => void;
 }
 
 export function PostProcessingPanel({
@@ -1292,6 +1416,7 @@ export function PostProcessingPanel({
   onCaptionStyleChange,
   onCaptionsEnabledChange,
   importedThumbnails = [],
+  onImportCaptions,
 }: PostProcessingPanelProps) {
   const [activeTab, setActiveTab] = useState<Tab>('description');
 
@@ -1383,6 +1508,7 @@ export function PostProcessingPanel({
               captionsEnabled={captionsEnabled}
               onStyleChange={onCaptionStyleChange}
               onEnabledChange={onCaptionsEnabledChange}
+              onImportCaptions={onImportCaptions}
             />
           )}
           {activeTab === 'thumbnails' && (

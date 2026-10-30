@@ -2,10 +2,11 @@ import React, { useEffect, useRef, useState, useCallback, useReducer } from 'rea
 import WaveSurfer from 'wavesurfer.js';
 import { VideoClip, Voiceover, TransitionType } from '../types';
 import { ClipWaveform } from './ClipWaveform';
-import { Play, Pause, Scissors, Wand2, Video, Plus, Minus, Maximize2, Zap, Layers, Star, Trash2 } from 'lucide-react';
+import { Play, Pause, Scissors, Wand2, Video, Plus, Minus, Maximize2, Zap, Layers, Star, Trash2, Keyboard } from 'lucide-react';
 import { DEFAULT_PPS, fitPixelsPerSecond, stepPixelsPerSecond } from '../utils/timelineZoom';
 import { findClipAtPlayhead, splitClipsAtPlayhead } from '../utils/clipSplit';
 import { selectionReducer, initialSelection, clipIdsInRect, type SelectionAction } from '../utils/selectionReducer';
+import { collectSnapCandidates, findSnap } from '../utils/timelineSnap';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 
@@ -15,6 +16,13 @@ function cn(...inputs: ClassValue[]) {
 
 // Shared visible focus indicator for every interactive timeline control.
 const FOCUS_RING = 'focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:ring-offset-1';
+
+/** Imperative playback controls App-level shortcuts drive; the clock stays in the Timeline. */
+export interface TimelineTransport {
+  togglePlay: () => void;
+  pause: () => void;
+  seekBy: (deltaSeconds: number) => void;
+}
 
 interface TimelineProps {
   voiceover: Voiceover | null;
@@ -28,6 +36,7 @@ interface TimelineProps {
   isAligning: boolean;
   currentTime: number;
   onTimeUpdate: (time: number) => void;
+  onTransportReady?: (transport: TimelineTransport | null) => void;
 }
 
 interface ClipDragState {
@@ -65,6 +74,14 @@ const TRANSITION_OPTIONS: { value: TransitionType; label: string; icon: string }
   { value: 'wipe',     label: 'Wipe',     icon: '➡️' },
 ];
 
+const SHORTCUT_HINTS: { keys: string[]; label: string }[] = [
+  { keys: ['Space'], label: 'Play / Pause' },
+  { keys: ['J'], label: 'Back 1s' },
+  { keys: ['K'], label: 'Pause' },
+  { keys: ['L'], label: 'Forward 1s' },
+  { keys: ['←', '→'], label: 'Frame step (1/30s)' },
+];
+
 const TRACK_H = 64;
 const TRACK_GAP = 16;
 const TRACK_ROW_H = TRACK_H + TRACK_GAP;
@@ -82,6 +99,7 @@ export const Timeline: React.FC<TimelineProps> = ({
   currentTime,
   onTimeUpdate,
   onVoiceoverChange,
+  onTransportReady,
 }) => {
   const waveformRef = useRef<HTMLDivElement>(null);
   const wavesurfer = useRef<WaveSurfer | null>(null);
@@ -98,6 +116,7 @@ export const Timeline: React.FC<TimelineProps> = ({
   const [altPopover, setAltPopover] = useState<{ clipId: string; x: number; y: number } | null>(null);
   const [selection, dispatchSelection] = useReducer(selectionReducer, initialSelection);
   const [marquee, setMarquee] = useState<MarqueeState | null>(null);
+  const [showShortcutsHelp, setShowShortcutsHelp] = useState(false);
 
   const clipDragRef = useRef<ClipDragState | null>(null);
   const selectionRef = useRef(selection);
@@ -176,6 +195,12 @@ export const Timeline: React.FC<TimelineProps> = ({
   }, [TRACK_PADDING]);
 
   const getTimeFromX = useCallback((x: number) => x / pixelsPerSecond, []);
+
+  // Snap targets for drag/trim gestures: the origin, the playhead, and every
+  // other clip's boundaries (excluding the clip being manipulated so an edge
+  // never snaps to itself). Reads via refs so drag effects stay live.
+  const snapTargets = (excludeId?: string) =>
+    collectSnapCandidates(videoClipsRef.current, currentTimeRef.current, excludeId);
 
   useEffect(() => {
     if (waveformRef.current && voiceover) {
@@ -265,6 +290,12 @@ export const Timeline: React.FC<TimelineProps> = ({
       const drag = clipDragRef.current;
       if (!drag) return;
       const deltaTime = (e.clientX - drag.startMouseX) / pixelsPerSecond;
+      // Snap the dragged clip's leading edge to a nearby boundary (origin,
+      // playhead, or a neighboring clip edge) by correcting the group delta;
+      // group members keep their offsets, matching multi-select semantics.
+      const rawStart = drag.startClipTime + deltaTime;
+      const snapAdjust = findSnap(rawStart, snapTargets(drag.id), pixelsPerSecond).time - rawStart;
+      const groupDeltaTime = deltaTime + snapAdjust;
       let trackDelta = 0;
       if (videoTracksContainerRef.current) {
         const rect = videoTracksContainerRef.current.getBoundingClientRect();
@@ -279,7 +310,7 @@ export const Timeline: React.FC<TimelineProps> = ({
       onVideoClipChange(videoClipsRef.current.map(c => {
         const start = group.get(c.id);
         if (!start) return c;
-        return { ...c, startTime: Math.max(0, start.startTime + deltaTime), track: Math.max(0, start.track + trackDelta) };
+        return { ...c, startTime: Math.max(0, start.startTime + groupDeltaTime), track: Math.max(0, start.track + trackDelta) };
       }));
     };
     const onUp = () => { clipDragRef.current = null; setDraggingClipId(null); onVideoClipChange(resolveOverlaps(videoClipsRef.current)); };
@@ -344,9 +375,13 @@ export const Timeline: React.FC<TimelineProps> = ({
       onVideoClipChange(videoClipsRef.current.map((c: VideoClip) => {
         if (c.id !== drag.id) return c;
         if (drag.side === 'right') {
-          return { ...c, trimmedDuration: Math.max(0.5, Math.min(drag.origTrimmedDuration + deltaSec, drag.origDuration - drag.origTrimStart)) };
+          const rawEnd = drag.origStartTime + drag.origTrimmedDuration + deltaSec;
+          const snappedEnd = findSnap(rawEnd, snapTargets(drag.id), pixelsPerSecond).time;
+          return { ...c, trimmedDuration: Math.max(0.5, Math.min(snappedEnd - drag.origStartTime, drag.origDuration - drag.origTrimStart)) };
         } else {
-          const clamped = Math.max(0, Math.min(deltaSec, drag.origTrimmedDuration - 0.5));
+          const rawStart = drag.origStartTime + deltaSec;
+          const snappedStart = findSnap(rawStart, snapTargets(drag.id), pixelsPerSecond).time;
+          const clamped = Math.max(0, Math.min(snappedStart - drag.origStartTime, drag.origTrimmedDuration - 0.5));
           return { ...c, trimStart: drag.origTrimStart + clamped > 0 ? drag.origTrimStart + clamped : undefined, startTime: Math.max(0, drag.origStartTime + clamped), trimmedDuration: drag.origTrimmedDuration - clamped };
         }
       }));
@@ -358,6 +393,19 @@ export const Timeline: React.FC<TimelineProps> = ({
   }, [draggingTrimId]);
 
   const togglePlay = () => setIsPlaying(p => !p);
+
+  // Imperative transport handle: the clock, its clamping, and the wavesurfer
+  // sync stay here — App's global shortcuts just press the buttons.
+  useEffect(() => {
+    if (!onTransportReady) return;
+    onTransportReady({
+      togglePlay: () => setIsPlaying(p => !p),
+      pause: () => setIsPlaying(false),
+      seekBy: (deltaSeconds: number) => seekToTime(currentTimeRef.current + deltaSeconds),
+    });
+    return () => onTransportReady(null);
+  }, [onTransportReady, seekToTime]);
+
   const handleTrackClick = (e: React.MouseEvent) => {
     if ((e.target as HTMLElement).closest('[data-clip]')) return;
     // A marquee drag suppresses the click-to-seek that follows its mouseup.
@@ -511,14 +559,49 @@ export const Timeline: React.FC<TimelineProps> = ({
             </div>
           )}
         </div>
-        <button
-          onClick={onAutoAlign}
-          disabled={isAligning || !voiceover || videoClips.length === 0}
-          className={cn('flex items-center gap-2 px-4 py-2 rounded-xl font-medium text-sm transition-all bg-violet-500 text-white hover:bg-violet-400 disabled:opacity-50 disabled:cursor-not-allowed', isAligning && 'animate-pulse', FOCUS_RING)}
-        >
-          <Wand2 className="w-4 h-4" />
-          {isAligning ? 'Analyzing…' : 'Auto-Align with AI'}
-        </button>
+        <div className="flex items-center gap-2">
+          <div className="relative">
+            <button
+              onClick={() => setShowShortcutsHelp(v => !v)}
+              aria-label="Keyboard shortcuts"
+              aria-expanded={showShortcutsHelp}
+              className={`p-1.5 rounded-lg text-gray-500 bg-white border border-gray-200 hover:border-violet-300 hover:text-violet-600 transition-all ${FOCUS_RING}`}
+            >
+              <Keyboard className="w-3.5 h-3.5" />
+            </button>
+            {showShortcutsHelp && (
+              <>
+                <div aria-hidden="true" className="fixed inset-0 z-40" onClick={() => setShowShortcutsHelp(false)} />
+                <div role="note" aria-label="Keyboard shortcut cheat sheet" className="absolute right-0 top-full mt-2 z-50 w-72 rounded-xl border border-gray-200 bg-white p-3 shadow-lg">
+                  <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-2">Keyboard shortcuts</p>
+                  <dl className="text-xs text-gray-600 space-y-1.5">
+                    {SHORTCUT_HINTS.map((hint) => (
+                      <div key={hint.label} className="flex items-center justify-between gap-4">
+                        <dt className="flex items-center gap-1">
+                          {hint.keys.map((k) => (
+                            <kbd key={k} className="px-1.5 py-0.5 rounded border border-gray-200 bg-gray-50 font-mono text-[10px] text-gray-500">{k}</kbd>
+                          ))}
+                        </dt>
+                        <dd className="text-right">{hint.label}</dd>
+                      </div>
+                    ))}
+                  </dl>
+                  <p className="mt-2 pt-2 border-t border-gray-100 text-[10px] text-gray-400">
+                    Shortcuts stand down while a text field or timeline control has focus.
+                  </p>
+                </div>
+              </>
+            )}
+          </div>
+          <button
+            onClick={onAutoAlign}
+            disabled={isAligning || !voiceover || videoClips.length === 0}
+            className={cn('flex items-center gap-2 px-4 py-2 rounded-xl font-medium text-sm transition-all bg-violet-500 text-white hover:bg-violet-400 disabled:opacity-50 disabled:cursor-not-allowed', isAligning && 'animate-pulse', FOCUS_RING)}
+          >
+            <Wand2 className="w-4 h-4" />
+            {isAligning ? 'Analyzing…' : 'Auto-Align with AI'}
+          </button>
+        </div>
       </div>
 
       {/* Scrollable track area */}
@@ -616,6 +699,7 @@ export const Timeline: React.FC<TimelineProps> = ({
                         const isActive = currentTime >= clip.startTime && currentTime < clip.startTime + effectiveDuration;
                         const isDragging = draggingClipId === clip.id;
                         const isTrimDragging = draggingTrimId === clip.id;
+                        const hasFilmstrip = (clip.thumbnails?.length ?? 0) > 0;
 
                         return (
                           <React.Fragment key={clip.id}>
@@ -646,12 +730,23 @@ export const Timeline: React.FC<TimelineProps> = ({
                               )}
                               style={{ left: `${clip.startTime * pixelsPerSecond}px`, width: `${effectiveDuration * pixelsPerSecond}px`, zIndex: isDragging ? 100 : 2 }}
                             >
+                              {/* Filmstrip background — sampled frames spanning the clip's full duration */}
+                              {clip.thumbnails && clip.thumbnails.length > 0 && (
+                                <div aria-hidden="true" className="pointer-events-none absolute inset-0 flex overflow-hidden rounded-xl">
+                                  {clip.thumbnails.map((src, i) => (
+                                    <img key={i} src={src} alt="" className="h-full min-w-0 flex-1 object-cover" />
+                                  ))}
+                                  {/* Scrim keeps the clip name readable over arbitrary frame content */}
+                                  <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/40 to-black/20" />
+                                </div>
+                              )}
                               {/* Audio waveform underlay — silent/undecodable media renders nothing.
                                   Sized to the full source duration and shifted by trimStart so the
-                                  visible slice matches what the clip plays. Negative z keeps it
-                                  above the block background but below labels; the block always sets
-                                  a zIndex, so it forms a stacking context. */}
-                              <div aria-hidden="true" className="absolute inset-0 -z-10 overflow-hidden rounded-xl pointer-events-none opacity-50">
+                                  visible slice matches what the clip plays. Painted above a filmstrip
+                                  when both exist (equal stacking, later DOM order wins), and below
+                                  the z-10 labels; the block always sets a zIndex, so it forms a
+                                  stacking context. */}
+                              <div aria-hidden="true" className="absolute inset-0 overflow-hidden rounded-xl pointer-events-none opacity-50">
                                 <div
                                   className="absolute top-0 bottom-0"
                                   style={{ width: `${clip.duration * pixelsPerSecond}px`, left: `-${(clip.trimStart ?? 0) * pixelsPerSecond}px` }}
@@ -676,18 +771,18 @@ export const Timeline: React.FC<TimelineProps> = ({
                                 <div className="w-0.5 h-4 bg-white/70 rounded-full" />
                               </div>
 
-                              <div className="flex items-center gap-2 overflow-hidden">
-                                <Video className="w-3.5 h-3.5 shrink-0" style={{ color: isActive ? 'white' : '#7c3aed' }} />
-                                <span className="text-xs font-medium truncate" style={{ color: isActive ? 'white' : '#5b21b6' }}>{clip.name}</span>
+                              <div className="relative z-10 flex items-center gap-2 overflow-hidden">
+                                <Video className="w-3.5 h-3.5 shrink-0" style={{ color: isActive || hasFilmstrip ? 'white' : '#7c3aed' }} />
+                                <span className="text-xs font-medium truncate" style={{ color: isActive || hasFilmstrip ? 'white' : '#5b21b6' }}>{clip.name}</span>
                               </div>
                               {(clip.trimmedDuration !== undefined || clip.trimStart !== undefined) && (
-                                <div className="flex items-center gap-1 mt-0.5">
+                                <div className="relative z-10 flex items-center gap-1 mt-0.5">
                                   <Scissors className="w-3 h-3 text-orange-400 shrink-0" />
                                   <span className="text-[10px] text-orange-400 font-medium">{effectiveDuration.toFixed(1)}s</span>
                                 </div>
                               )}
                               {clip.analysis && clip.trimmedDuration === undefined && clip.trimStart === undefined && (
-                                <div className="text-[10px] truncate mt-0.5 italic" style={{ color: isActive ? 'rgba(255,255,255,0.7)' : '#8b5cf6' }}>{clip.analysis}</div>
+                                <div className="relative z-10 text-[10px] truncate mt-0.5 italic" style={{ color: isActive || hasFilmstrip ? 'rgba(255,255,255,0.7)' : '#8b5cf6' }}>{clip.analysis}</div>
                               )}
 
                               {/* Right trim */}

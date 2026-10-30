@@ -1,6 +1,6 @@
 import { Type, FileState } from "@google/genai";
 import { startLog, finishLog } from "./logger";
-import { generateContent, getAI } from "./geminiClient";
+import { generateContent, getAI, normalizeErrorMessage } from "./geminiClient";
 import { modelFor } from "./models";
 import { LruCache } from "../utils/lruCache";
 
@@ -112,7 +112,7 @@ export async function generateAudioFromScript(
     const duration = await getAudioDuration(url);
     return { url, duration, transcription: script };
   } catch (err) {
-    finishLog(log, err?.message ?? String(err));
+    finishLog(log, normalizeErrorMessage(err));
     throw err;
   }
 }
@@ -138,7 +138,7 @@ ${videoClips.map((c, i) => `Clip ${i + 1} (${c.duration.toFixed(1)}s) — "${c.n
     const script = scriptResponse.text?.trim() || 'No narration could be generated.';
     return generateAudioFromScript(script, voiceName);
   } catch (err) {
-    finishLog(log, err?.message ?? String(err));
+    finishLog(log, normalizeErrorMessage(err));
     throw err;
   }
 }
@@ -198,7 +198,7 @@ export async function analyzeVoiceover(
     const segments = estimateSegments(transcription, totalDuration);
     return { transcription, segments };
   } catch (err) {
-    finishLog(log, err?.message ?? String(err));
+    finishLog(log, normalizeErrorMessage(err));
     throw err;
   }
 }
@@ -222,7 +222,7 @@ export async function analyzeVideo(videoFile: File): Promise<string> {
     const result = response.text || 'No analysis available.';
     return result;
   } catch (err) {
-    finishLog(log, err?.message ?? String(err));
+    finishLog(log, normalizeErrorMessage(err));
     throw err;
   }
 }
@@ -297,7 +297,7 @@ Return a JSON array with one object per position, each containing:
     const entries: AlignmentEntry[] = JSON.parse(response.text || '[]');
     return entries;
   } catch (err) {
-    finishLog(log, err?.message ?? String(err));
+    finishLog(log, normalizeErrorMessage(err));
     throw err;
   }
 }
