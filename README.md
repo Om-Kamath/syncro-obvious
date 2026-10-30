@@ -29,3 +29,17 @@ A narration-first video editor in the browser: import clips, generate narration 
 | `npm test` | Run Vitest tests |
 | `npm run lint` | Type-check (`tsc --noEmit`) + ESLint |
 | `npm run clean` | Remove `dist/` |
+
+## Media API
+
+The API server (port 3001) stores uploaded media blobs on disk:
+
+- `POST /api/media` — the raw request body is the blob (no multipart); optional `?filename=`
+  query param or `x-filename` header names it. Returns 201 with `{ id, filename, mimeType, size, createdAt }`.
+- `GET /api/media/:id` — serves the bytes with HTTP range support (206 partial responses,
+  `Accept-Ranges: bytes`) so `<video>` elements can seek. `HEAD` is supported.
+- Out-of-range requests get 416; uploads over the size cap get 413.
+
+Configuration: `SYNCRO_MEDIA_DIR` (blob directory, default `data/media`) and
+`SYNCRO_MAX_UPLOAD_BYTES` (default 536870912 = 512 MiB). Both can also be passed per app
+instance through `createApp` options.

@@ -1,21 +1,43 @@
+import { join } from 'node:path';
 import express, { type Express, type NextFunction, type Request, type Response } from 'express';
+import { createMediaRouter } from './media/media.router';
+import { MediaStore } from './media/media.store';
+
+const DEFAULT_MAX_UPLOAD_BYTES = 512 * 1024 * 1024;
+const DEFAULT_MEDIA_ROOT = join(process.cwd(), 'data', 'media');
+
+export interface MediaOptions {
+  /** Directory for stored blobs. Default: `SYNCRO_MEDIA_DIR` or `<cwd>/data/media`. */
+  rootDir?: string;
+  /** Upload size cap in bytes. Default: `SYNCRO_MAX_UPLOAD_BYTES` or 512 MiB. */
+  maxUploadBytes?: number;
+}
+
+export interface AppOptions {
+  media?: MediaOptions;
+}
 
 /**
  * App factory: builds a fully-configured Express app without binding a port,
  * so tests and future tooling get a fresh instance per call.
  * server/index.ts owns the actual listener.
  */
-export function createApp(): Express {
+export function createApp(options: AppOptions = {}): Express {
   const app = express();
 
   app.disable('x-powered-by');
+
+  // Mounted before express.json() so binary — and mislabeled JSON — upload
+  // bodies reach the media router raw instead of going through the parser.
+  app.use('/api/media', createMediaRouter(createMediaStore(options.media)));
+
   app.use(express.json());
 
   app.get('/healthz', (_req, res) => {
     res.json({ ok: true });
   });
 
-  // Same payload under the /api prefix that CRUD routes (PRs 23+) will share.
+  // Same payload under the /api prefix that the media routes already share.
   app.get('/api/health', (_req, res) => {
     res.json({ ok: true });
   });
@@ -28,6 +50,25 @@ export function createApp(): Express {
   app.use(errorHandler);
 
   return app;
+}
+
+function createMediaStore(options: MediaOptions | undefined): MediaStore {
+  const rootDir = options?.rootDir ?? process.env.SYNCRO_MEDIA_DIR ?? DEFAULT_MEDIA_ROOT;
+  const maxUploadBytes =
+    options?.maxUploadBytes ?? parseMaxUploadBytes(process.env.SYNCRO_MAX_UPLOAD_BYTES);
+  return new MediaStore(rootDir, maxUploadBytes);
+}
+
+function parseMaxUploadBytes(raw: string | undefined): number {
+  if (raw === undefined || raw === '') return DEFAULT_MAX_UPLOAD_BYTES;
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value <= 0) {
+    console.warn(
+      `[syncro-server] ignoring invalid SYNCRO_MAX_UPLOAD_BYTES "${raw}" — using ${DEFAULT_MAX_UPLOAD_BYTES}`,
+    );
+    return DEFAULT_MAX_UPLOAD_BYTES;
+  }
+  return value;
 }
 
 /** Map a thrown error to the HTTP status it should produce. */
