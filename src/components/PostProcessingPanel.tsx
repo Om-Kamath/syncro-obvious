@@ -18,11 +18,14 @@ import {
   ChevronUp,
   Hash,
   Film,
+  Trash2,
 } from 'lucide-react';
 import { VideoClip, Voiceover, CaptionStyle, CaptionMode, VideoDescription, ThumbnailCandidate } from '../types';
 import { generateDescription, identifyKeyMoments } from '../services/postProcessing';
 import { normalizeErrorMessage } from '../services/geminiClient';
 import { generateSRT, generateVTT, downloadTextFile } from '../utils/captionUtils';
+import { listTemplates, saveTemplate, deleteTemplate, applyTemplate, loadTemplatesResult } from '../services/captionTemplates';
+import type { CaptionTemplate } from '../types';
 import { captureVideoFrame, addQuoteOverlay, downloadDataUrl, downloadFile, getClipAtTime } from '../utils/exportUtils';
 import { EXPORT_PRESETS, DEFAULT_EXPORT_PRESET, computeDrawGeometry, type ExportPresetId } from '../utils/exportPresets';
 import { audioChannelsOf, mixAudio, sliceAudioWindow, toAudioBuffer } from '../utils/audioMix';
@@ -309,6 +312,39 @@ function CaptionsTab({
   const handleMode = (mode: CaptionMode) => onStyleChange({ ...captionStyle, mode });
   const handlePosition = (position: 'bottom' | 'top') => onStyleChange({ ...captionStyle, position });
 
+  // Templates load once, at initialization — no effect, no setState-in-effect.
+  const [initialLoad] = useState(loadTemplatesResult);
+  const [templates, setTemplates] = useState<CaptionTemplate[]>(initialLoad.templates);
+  const [templateName, setTemplateName] = useState('');
+  const [templateError, setTemplateError] = useState<string | null>(initialLoad.error);
+
+  const handleSaveTemplate = () => {
+    const name = templateName.trim();
+    if (!name) return;
+    try {
+      saveTemplate(name, captionStyle);
+      setTemplates(listTemplates());
+      setTemplateName('');
+      setTemplateError(null);
+    } catch (err) {
+      setTemplateError(err instanceof Error ? err.message : 'Failed to save template');
+    }
+  };
+
+  const handleApplyTemplate = (template: CaptionTemplate) => {
+    onStyleChange(applyTemplate(template));
+  };
+
+  const handleDeleteTemplate = (id: string) => {
+    try {
+      deleteTemplate(id);
+      setTemplates(listTemplates());
+      setTemplateError(null);
+    } catch (err) {
+      setTemplateError(err instanceof Error ? err.message : 'Failed to delete template');
+    }
+  };
+
   const modeOptions: { value: CaptionMode; label: string; desc: string }[] = [
     { value: 'lower-third', label: 'Lower Third', desc: 'Classic bar at bottom' },
     { value: 'word-highlight', label: 'Word Highlight', desc: 'Highlights current word' },
@@ -440,6 +476,71 @@ function CaptionsTab({
             </button>
           ))}
         </div>
+      </div>
+
+      {/* Templates */}
+      <div className="space-y-2">
+        <p className="text-xs font-bold uppercase tracking-widest text-violet-500">Templates</p>
+        <div className="flex gap-2">
+          <input
+            type="text"
+            value={templateName}
+            onChange={e => setTemplateName(e.target.value)}
+            onKeyDown={e => {
+              if (e.key === 'Enter') handleSaveTemplate();
+            }}
+            placeholder="Name this style…"
+            aria-label="Template name"
+            className="flex-1 min-w-0 px-3 py-2 text-sm bg-gray-50 border border-gray-200 rounded-xl text-gray-900 placeholder-gray-400 focus:outline-none focus:border-violet-400"
+          />
+          <button
+            onClick={handleSaveTemplate}
+            disabled={!templateName.trim()}
+            className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold bg-violet-600 text-white rounded-xl hover:bg-violet-500 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
+          >
+            <Check className="w-3.5 h-3.5" />
+            Save
+          </button>
+        </div>
+        {templateError && (
+          <p className="text-xs text-red-500 px-1" role="alert">{templateError}</p>
+        )}
+        {templates.length === 0 ? (
+          <p className="text-xs text-gray-400 px-1 py-2">
+            No templates yet. Style your captions, then save them here to reuse.
+          </p>
+        ) : (
+          <div className="space-y-2">
+            {templates.map(t => (
+              <div
+                key={t.id}
+                className="flex items-center justify-between gap-3 p-2.5 bg-gray-50 border border-gray-100 rounded-xl"
+              >
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-gray-900 truncate">{t.name}</p>
+                  <p className="text-[10px] text-gray-400 font-mono">
+                    {t.style.mode} · {t.style.fontSize}px · {t.style.position}
+                  </p>
+                </div>
+                <div className="flex items-center gap-2 flex-shrink-0">
+                  <button
+                    onClick={() => handleApplyTemplate(t)}
+                    className="px-3 py-1.5 text-xs font-semibold text-violet-600 border border-gray-200 rounded-lg hover:border-violet-400 hover:bg-violet-50 transition-all"
+                  >
+                    Apply
+                  </button>
+                  <button
+                    onClick={() => handleDeleteTemplate(t.id)}
+                    aria-label={`Delete template ${t.name}`}
+                    className="p-1.5 text-gray-400 hover:text-red-500 transition-colors"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Download */}
