@@ -3,6 +3,7 @@ import React, { Suspense, useState, useRef, useEffect, useCallback } from 'react
 import { VideoClip, Voiceover, CaptionStyle, CaptionSegment, ThumbnailCandidate } from './types';
 import { CaptionOverlay } from './components/CaptionOverlay';
 import { FileUploader } from './components/FileUploader';
+import { MediaListSkeleton } from './components/MediaListSkeleton';
 import { MediaDropLayer, type ImportedMedia } from './components/MediaDropLayer';
 import { Timeline } from './components/Timeline';
 import type { TimelineTransport } from './components/Timeline';
@@ -90,6 +91,7 @@ type VoiceoverMethod = 'upload' | 'script' | 'auto';
 function OnboardingModal({
   step, onStepComplete, onVideoUpload, videoClips, onVoiceoverUpload,
   onGenerateFromScript, onGenerateNarration, isGenerating, onUploadRejected,
+  pendingMediaCount,
 }: {
   step: 1 | 2;
   onStepComplete: () => void;
@@ -100,6 +102,7 @@ function OnboardingModal({
   onGenerateNarration: (voice: string) => Promise<void>;
   isGenerating: boolean;
   onUploadRejected?: (files: File[]) => void;
+  pendingMediaCount: number;
 }) {
   const [voiceoverMethod, setVoiceoverMethod] = useState<VoiceoverMethod | null>(null);
   const [script, setScript] = useState('');
@@ -168,6 +171,7 @@ function OnboardingModal({
                     ))}
                   </div>
                 )}
+                <MediaListSkeleton count={pendingMediaCount} label="Loading videos…" />
                 <button onClick={onStepComplete} disabled={videoClips.length === 0}
                   className="w-full flex items-center justify-center gap-2 py-3 bg-violet-600 hover:bg-violet-700 disabled:opacity-40 disabled:cursor-not-allowed text-white font-semibold rounded-2xl transition-all shadow-lg shadow-violet-200">
                   Continue <ArrowRight className="w-4 h-4" />
@@ -257,6 +261,7 @@ function OnboardingModal({
 
 export default function App() {
   const [videoClips, setVideoClips] = useState<VideoClip[]>([]);
+  const [pendingMediaCount, setPendingMediaCount] = useState(0);
   const [voiceover, setVoiceover] = useState<Voiceover | null>(null);
   const [isAligning, setIsAligning] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
@@ -363,13 +368,18 @@ export default function App() {
     new Promise(resolve => { const a = new Audio(url); a.onloadedmetadata = () => resolve(a.duration); a.onerror = () => resolve(0); });
 
   const handleVideoUpload = async (files: File[]) => {
-    const newClips: VideoClip[] = await Promise.all(files.map(async (file) => {
-      const url = URL.createObjectURL(file);
-      const duration = await getVideoDuration(url);
-      return { id: Math.random().toString(36).substr(2, 9), file, url, duration, startTime: 0, name: file.name };
-    }));
-    setVideoClips(prev => [...prev, ...newClips]);
-    attachFilmstrips(newClips, setVideoClips);
+    setPendingMediaCount(files.length);
+    try {
+      const newClips: VideoClip[] = await Promise.all(files.map(async (file) => {
+        const url = URL.createObjectURL(file);
+        const duration = await getVideoDuration(url);
+        return { id: Math.random().toString(36).substr(2, 9), file, url, duration, startTime: 0, name: file.name };
+      }));
+      setVideoClips(prev => [...prev, ...newClips]);
+      attachFilmstrips(newClips, setVideoClips);
+    } finally {
+      setPendingMediaCount(0);
+    }
   };
 
   const handleVoiceoverUpload = async (files: File[]) => {
@@ -651,6 +661,7 @@ export default function App() {
             onGenerateNarration={handleGenerateNarration}
             isGenerating={isGeneratingAudio}
             onUploadRejected={handleAppDropRejected}
+            pendingMediaCount={pendingMediaCount}
           />
         )}
       </AnimatePresence>
@@ -819,6 +830,7 @@ export default function App() {
                   </motion.div>
                 ))}
               </AnimatePresence>
+              <MediaListSkeleton count={pendingMediaCount} />
             </div>
           </section>
         </div>
