@@ -505,6 +505,12 @@ export default function App() {
     });
   };
 
+  // An imported SRT/VTT replaces the AI-transcribed/estimated caption track:
+  // same voiceover audio, but cue timings and transcript text from the file.
+  const handleImportCaptions = (segments: CaptionSegment[], transcription: string) => {
+    setVoiceover(prev => prev ? { ...prev, transcription, segments } : prev);
+  };
+
   // Swap a clip with one of its alternatives on the timeline (preserves chainClips order)
   const handleSwapClip = (clipId: string, altId: string) => {
     setVideoClips(prev => {
@@ -846,6 +852,7 @@ export default function App() {
                     onCaptionStyleChange={setCaptionStyle}
                     onCaptionsEnabledChange={setCaptionsEnabled}
                     importedThumbnails={importedThumbnails}
+                    onImportCaptions={handleImportCaptions}
                   />
                 </Suspense>
               </div>
