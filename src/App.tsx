@@ -1,5 +1,4 @@
-
-import React, { Suspense, useState, useRef, useEffect, useCallback } from 'react';
+import React, { Suspense, useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { VideoClip, Voiceover, CaptionStyle, CaptionSegment, ThumbnailCandidate } from './types';
 import { CaptionOverlay } from './components/CaptionOverlay';
 import { FileUploader } from './components/FileUploader';
@@ -39,8 +38,13 @@ import {
   Activity,
   Key,
   FolderOpen,
+  CloudUpload,
+  CloudOff,
+  Check,
 } from 'lucide-react';
 import { setApiKey, hasApiKey } from './services/apiKey';
+import { buildProjectSnapshot, saveProjectSnapshot } from './services/projectSnapshot';
+import { useAutosave } from './hooks/useAutosave';
 import { chainClips, rippleDeleteMany } from './utils/chainClips';
 import { DEFAULT_CAPTION_STYLE } from './utils/captionPresets';
 import { captureFilmstrip } from './utils/clipThumbnails';
@@ -329,6 +333,18 @@ export default function App() {
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, []);
+
+  // Autosave: once the project stops changing for the idle window, persist a
+  // JSON-safe snapshot to localStorage; the header pill reflects progress.
+  const projectSnapshot = useMemo(
+    () => buildProjectSnapshot(videoClips, voiceover, captionStyle, captionsEnabled),
+    [videoClips, voiceover, captionStyle, captionsEnabled],
+  );
+  const autosave = useAutosave({
+    data: projectSnapshot,
+    save: saveProjectSnapshot,
+    enabled: videoClips.length > 0 || voiceover !== null,
+  });
 
   useEffect(() => {
     const sorted = [...videoClips].sort((a, b) => b.startTime - a.startTime);
@@ -665,6 +681,31 @@ export default function App() {
           </div>
         </div>
         <div className="flex items-center gap-3">
+          {autosave.status === 'error' ? (
+            <button
+              onClick={autosave.saveNow}
+              title={`${autosave.error ?? 'Autosave failed'} — click to retry`}
+              data-testid="autosave-status"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium bg-red-50 text-red-600 hover:bg-red-100 transition-colors"
+            >
+              <CloudOff className="w-3 h-3" />
+              Autosave failed — retry
+            </button>
+          ) : autosave.status !== 'idle' && (
+            <div
+              data-testid="autosave-status"
+              className={cn(
+                'flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium',
+                autosave.status === 'dirty' && 'bg-amber-50 text-amber-600',
+                autosave.status === 'saving' && 'bg-gray-100 text-gray-500',
+                autosave.status === 'saved' && 'bg-emerald-50 text-emerald-600',
+              )}
+            >
+              {autosave.status === 'dirty' && <><CloudUpload className="w-3 h-3" /> Unsaved changes</>}
+              {autosave.status === 'saving' && <><Loader2 className="w-3 h-3 animate-spin" /> Saving…</>}
+              {autosave.status === 'saved' && <><Check className="w-3 h-3" /> All changes saved</>}
+            </div>
+          )}
           <div className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-100 rounded-full text-xs font-medium text-gray-500">
             <Clock className="w-3 h-3" />
             {currentTime.toFixed(2)}s
