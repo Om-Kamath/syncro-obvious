@@ -5,6 +5,10 @@ import { ClipWaveform } from './ClipWaveform';
 import { Timeline } from './Timeline';
 import type { VideoClip } from '../types';
 
+// Literal expected palette — pins the muted tones as a regression guard rather
+// than mirroring the implementation constant.
+const MUTED_WAVE_COLORS = { waveColor: '#9ca3af', progressColor: '#d1d5db' };
+
 const { FakeWaveSurfer, waveSurferInstances, resetWaveSurfer, setAutoReady } = vi.hoisted(() => {
   class FakeWaveSurfer {
     static instances: FakeWaveSurfer[] = [];
@@ -98,6 +102,13 @@ describe('ClipWaveform', () => {
     expect(options.height).toBe(64);
   });
 
+  it('renders a dimmed waveform container when given the muted palette (snapshot)', () => {
+    const { container } = render(
+      <ClipWaveform url="blob:clip-1" waveColor={MUTED_WAVE_COLORS.waveColor} progressColor={MUTED_WAVE_COLORS.progressColor} />,
+    );
+    expect(container.firstChild).toMatchSnapshot();
+  });
+
   it('hides the waveform when the media has no decodable audio', () => {
     setAutoReady(false);
     const { container } = render(<ClipWaveform url="blob:silent" />);
@@ -149,5 +160,16 @@ describe('Timeline clip waveforms', () => {
     ]);
     expect(waveSurferInstances).toHaveLength(2);
     expect(waveSurferInstances.map((i) => i.options.url)).toEqual(['blob:clip-1', 'blob:clip-2']);
+  });
+
+  it('renders clip waveforms in the muted palette — original clip audio never plays (preview videos are hard-muted; export mixes narration + music only)', () => {
+    renderTimeline([makeClip()]);
+    expect(waveSurferInstances[0].options.waveColor).toBe(MUTED_WAVE_COLORS.waveColor);
+    expect(waveSurferInstances[0].options.progressColor).toBe(MUTED_WAVE_COLORS.progressColor);
+  });
+
+  it('matches a snapshot of the muted clip waveform state (snapshot)', () => {
+    const { container } = renderTimeline([makeClip()]);
+    expect(container.querySelector('[data-clip-waveform="ready"]')).toMatchSnapshot();
   });
 });

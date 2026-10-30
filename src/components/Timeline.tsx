@@ -87,6 +87,13 @@ const TRACK_GAP = 16;
 const TRACK_ROW_H = TRACK_H + TRACK_GAP;
 const TRACK_LABEL_W = 36;
 
+// Per-clip waveforms depict the clip's ORIGINAL audio, which Syncro keeps muted
+// by design: preview <video> elements are hard-muted and the export bus mixes
+// narration + music only. They render in a dimmed gray palette so a muted clip
+// never reads as a live sound source — full violet accent stays reserved for
+// the audible voiceover waveform.
+const MUTED_WAVE_COLORS = { waveColor: '#9ca3af', progressColor: '#d1d5db' };
+
 export const Timeline: React.FC<TimelineProps> = ({
   voiceover,
   videoClips,
@@ -751,7 +758,7 @@ export const Timeline: React.FC<TimelineProps> = ({
                                   className="absolute top-0 bottom-0"
                                   style={{ width: `${clip.duration * pixelsPerSecond}px`, left: `-${(clip.trimStart ?? 0) * pixelsPerSecond}px` }}
                                 >
-                                  <ClipWaveform url={clip.url} height={TRACK_H} />
+                                  <ClipWaveform url={clip.url} height={TRACK_H} {...MUTED_WAVE_COLORS} />
                                 </div>
                               </div>
 
